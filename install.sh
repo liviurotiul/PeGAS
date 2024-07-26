@@ -14,3 +14,4 @@ mkdir -p "$DEST_DIR"
 # Copy the Snakefile to the destination directory
 cp src/pegas/Snakefile "$DEST_DIR"
 cp src/pegas/layout.html "$DEST_DIR"
+cp "src/pegas/prokka_env.yml" "$DEST_DIR"
