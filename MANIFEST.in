@@ -1,3 +1,4 @@
 include src/pegas/Snakefile
 include src/pegas/*.py
 include src/pegas/layout.html
+include src/pegas/prokka_env.yml
