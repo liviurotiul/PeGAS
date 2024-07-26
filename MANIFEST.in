@@ -1,2 +1,3 @@
 include src/pegas/Snakefile
 include src/pegas/*.py
+include layout.html
