@@ -12,7 +12,7 @@ setup(
     name='pegas',
     version='0.1.3',
     packages=find_packages(where="src"),
-    package_dir={"": "src"},
+    package_dir={'pegas': 'src'},
     include_package_data=True,
     cmdclass={
         'install': CustomInstallCommand,

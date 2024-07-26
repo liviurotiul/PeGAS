@@ -16,7 +16,7 @@ def main():
 
     args = parser.parse_args()
 
-    command = f"snakemake --snakefile {path}/src/Snakefile --cores 32 --rerun-incomplete --use-conda --config"
+    command = f"snakemake --snakefile {path}/Snakefile --cores 32 --rerun-incomplete --use-conda --config"
 
     if args.d:
         command += f" raw_data={args.d}"
