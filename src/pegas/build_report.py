@@ -14,7 +14,6 @@ from itertools import permutations
 from bs4 import BeautifulSoup as bs
 from collections import Counter
 from math import sqrt
-from Bio import Phylo
 from jinja2 import Template
 
 from utils import *
