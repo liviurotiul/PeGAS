@@ -11,8 +11,9 @@ raw_data_path = config.get("raw_data", None)
 list_of_samples = config.get("samples", None)
 outdir = config.get("outdir", None)
 overwrite = config.get("overwrite", True)
+install_path = config.get("install_path", None)
 
-with open(f"layout.html", 'r') as file:
+with open(f"{install_path}/layout.html", 'r') as file:
     html_string = file.read()
 
 if not outdir:

@@ -27,6 +27,8 @@ def main():
     if args.s:
         command += f" samples={args.s}"
     
+    command += f" install_path={path}"
+
     print("Running PeGAS pipeline")
 
     # Run the pipeline
