@@ -3,7 +3,6 @@ import pandas as pd
 import time
 from tqdm import tqdm
 from utils import species_dict
-from utils import forbidden_files
 from build_dataframe import build_dataframe
 from build_report import build_report
 
