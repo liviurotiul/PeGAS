@@ -10,7 +10,7 @@ class CustomInstallCommand(install):
 
 setup(
     name='pegas',
-    version='0.1.12',
+    version='0.1.13',
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,
