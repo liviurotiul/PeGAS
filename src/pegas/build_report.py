@@ -321,7 +321,7 @@ def build_report(html_string):
 
     # ______________ Network graph ____________________
 
-  
+
     samples = df['SAMPLE'].unique().tolist()
 
     if len(samples) > 1:
@@ -329,6 +329,9 @@ def build_report(html_string):
         sample_network_dict = {}
 
         for item in samples:
+
+            if item in ['nan','-']:
+                continue
 
             df_sample = df[df['SAMPLE'] == item]
             df_sample = df_sample[['GENE', 'PREDICTION_SOURCE']]
