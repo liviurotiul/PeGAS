@@ -4,7 +4,8 @@
 
 This is PeGAS, a powerful bioinformatic tool designed for the seamless quality control, assembly, and annotation of Illumina paired-end reads specific to pathogenic bacteria. This tool integrates state-of-the-art open-source software to provide a streamlined and efficient workflow, ensuring accurate insights into the genomic makeup of pathogenic microbial strains.
 
-## Key Features:
+## Key Features
+<br/>
 
 - **Quality Control:** Utilize industry-standard tools such as FastQC, and Cutadapt to assess and enhance the quality of Illumina paired-end reads.
 
@@ -13,16 +14,17 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 - **Annotation:** We employ abricate for specific gene profiling and prokka for pangenomic analysis
 
 - **Visualization:** PeGAS uses Plotly for interactive data visualisation in the browser
+
 - **Parallel execution:** Using Snakemake as a base, the workflow is mostly parallel allowing for fast execution
 
 ![Alt text](Features.png)
 
 <img src="SunburstDemo1.gif" width="100%">
 
-## How to Use:
+## How to Use
 
 
-### 1. Prerequisites:
+### 1. Prerequisites
 
 - **CONDA**
 
@@ -45,7 +47,7 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 
 
 
-### 3.  Using PeGAS:
+### 3.  Using PeGAS
 
 - First set up a folder in a different path to the one where PeGAS was installed
 - Copy all your fastq.gz files in the folder with their original names
@@ -74,5 +76,5 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 						delete all data computed regarding pangenome and start
 						all over
 	```
-### 3.  Visualising the results:
+### 3.  Visualising the results
 - After the files have been processed and the analysis is completed, you can visualise the results in the path, in the report folder and all the resulting files in the results folder
