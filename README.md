@@ -15,47 +15,66 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 - **Visualization:** PeGAS uses Plotly for interactive data visualisation in the browser
 - **Parallel execution:** Using Snakemake as a base, the workflow is mostly parallel allowing for fast execution
 
+![Alt text](Features.png)
+
+![Alt text](SunburstDemo1.gif)
+
+
+
 ## How to Use:
 
 
 ### 1. Prerequisites:
 
-Before using PeGAS, ensure you have the following prerequisites installed:
+- **CONDA**
 
-- **Conda:** If not already installed, follow the instructions [here](https://github.com/conda-forge/miniforge?tab=readme-ov-file) to install conda Miniforge.
+	**IMPORTANT**: PeGAS uses **snakemake** as a base which needs **mamba**, a reimplementation of conda in C++. As far as we know, mamba can **only** be installed alongside miniconda or miniforge. The installation alongside anaconda is not yet possible.
+
+	To find out if you have miniconda or anaconda you can open a terminal and type:
+
+		conda info
+
+	You should be able to see either miniconda or anaconda a lot.
+
+	If you **don't have conda yet installed** we recommend conda [Miniforge](https://github.com/conda-forge/miniforge?tab=readme-ov-file)
+
 - **Mamba:** After the conda installation, open a new terminal (so that the base environement is active and use this command to install Mamba:
 	```bash
 	(base)user@user:~$ conda install mamba
 	```
-- **Installation:**
 
-	Clone PeGAS repository to your desired location using Git:
+### 2. Installing PeGAS
 
-	```bash
-	(base)user@user:~/Desired/location$ git clone https://github.com/liviurotiul/PeGAS-snakemake.git
-	```
-- **Roary:** Install roary:
-	```bash
-	(base)user@user:sudo apt-get install roary
-	```
-- **Environment:** Create the conda environemnt you will use for the execution and activate it:
-	```bash
-	(base)user@user:~/Desired/location$ conda env create -f environment.yaml
-	(base)user@user:~/Desired/location$ conda env create -f prokka_env.yaml
-	...
-	(base)user@user:~/Desired/location$ conda activate PeGAS-snakemake
-	```
-### 2.  Using PeGAS:
+
+
+### 3.  Using PeGAS:
+
 - First set up a folder in a different path to the one where PeGAS was installed
 - Copy all your fastq.gz files in the folder with their original names
-- Run this command in the terminal:
+
+- Pegas should then work almost out of the box just by activating the **pegas** environment and running:
+
 	```bash
-	(base)user@user:~/Desired/location$ snakemake --cores 32 --rerun-incomplete --use-conda --config raw_data=Path/To/Your/Data
+	pegas --data path/to/raw/data --output path/to/output/folder
 	```
-- Alternatively you can provide a text file with the name of the samples (one sample per line) by modifying the command as such:
-	```bash
-	(base)user@user:~/Desired/location$ snakemake --cores 32 --rerun-incomplete --use-conda --config raw_data=Path/To/Your/Data list_of_samples=Path/To/The/File
+
+	```text
+	usage: pegas [-h] --d D --o O [--s S] [--c C] [--overwrite]
+             [--rerun-pangenome]
+
+	
+	optional arguments:
+	-h, --help          show this help message and exit
+	--d D, --data D     The data directory, with all the fastq.gz files
+	--o O, --output O   The output directory
+	--s S, --samples S  The path to a text file with the list of samples to be
+						processed, each on a new line
+	--c C, --cores C    The number of cores to use
+	--overwrite         Overwrite the output directory if it exists
+	--rerun-pangenome   Rerun the pangenome analysis; sometimes pipeline can
+						crash during pangenome analysis; This command will
+						delete all data computed regarding pangenome and start
+						all over
 	```
-	**Set the *--cores* parameter according to your machine capabilities.**
 ### 3.  Visualising the results:
 - After the files have been processed and the analysis is completed, you can visualise the results in the path, in the report folder and all the resulting files in the results folder
