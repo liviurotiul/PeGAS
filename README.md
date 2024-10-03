@@ -17,7 +17,7 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 
 ![Alt text](Features.png)
 
-<img src="SunburstDemo1.gif" style="width:100%">
+<img src="SunburstDemo1.gif" width="100%">
 
 ## How to Use:
 
