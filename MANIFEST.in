@@ -2,3 +2,7 @@ include src/pegas/Snakefile
 include src/pegas/*.py
 include src/pegas/layout.html
 include src/pegas/prokka_env.yml
+include src/pegas/abricate_env.yml
+include src/pegas/mlst_env.yml
+include src/pegas/fastqc_env.yml
+include src/pegas/shovill_env.yml

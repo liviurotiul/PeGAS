@@ -77,9 +77,9 @@ if "pangenome" in os.listdir():
             if file.replace(".gff", "") not in list_of_samples and not file == "output":
 
                 tqdm.write(f"(pegas)Deleting {file} from pangenome/{species}")
-                os.system(f"rm {outdir}pangenome/{species}/{file}")
+                os.system(f"rm {outdir}/pangenome/{species}/{file}")
 
-                if not os.path.exists(f"{outdir}pangenome/{species}"):
+                if not os.path.exists(f"{outdir}/pangenome/{species}"):
                     continue
 
                 # Should also delete the pangenomic analysis since it is not valid anymore
