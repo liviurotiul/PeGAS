@@ -11,9 +11,9 @@ list_of_samples = config.get("samples", None)
 outdir = config.get("outdir", None)
 overwrite = config.get("overwrite", True)
 install_path = config.get("install_path", None)
-shovill_cpus = config.get("shovill-cpu-cores", 1)
-prokka_cpus = config.get("prokka-cpu-cores", 1)
-roary_cpus = config.get("roary-cpu-cores", 1)
+shovill_cpus = config.get("shovill_cpu_cores", 1)
+prokka_cpus = config.get("prokka_cpu_cores", 1)
+roary_cpus = config.get("roary_cpu_cores", 1)
 
 with open(f"{install_path}/layout.html", 'r') as file:
     html_string = file.read()
