@@ -192,7 +192,7 @@ rule shovill:
     conda:
         "shovill_env.yml"
     shell:
-        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force" + f"--cpus {shovill_cpus}"
+        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force " + f"--cpus {shovill_cpus}"
 
 rule abricate_ncbi:
     input:
