@@ -16,6 +16,9 @@ def main():
     parser.add_argument("--c", "--cores", help="The number of cores to use", required=False, default=1, type=int)
     parser.add_argument("--overwrite", help="Overwrite the output directory if it exists", action="store_true", default=False)
     parser.add_argument("--rerun-pangenome", help="Rerun the pangenome analysis; sometimes pipeline can crash during pangenome analysis; This command will delete all data computed regarding pangenome and start all over", action="store_true", default=False)
+    parser.add_argument("--shovill-cpu-cores", help="Number of CPU cores to use for shovill", required=False, default=1, type=int)
+    parser.add_argument("--prokka-cpu-cores", help="Number of CPU cores to use for prokka", required=False, default=1, type=int)
+    parser.add_argument("--roary-cpu-cores", help="Number of CPU cores to use for roary", required=False, default=1, type=int)
 
     args = parser.parse_args()
     cores = args.c
@@ -39,6 +42,15 @@ def main():
 
     if args.s:
         command += f" samples={args.s}"
+    
+    if args.shovill_cpu_cores:
+        command += f" shovill_cpu_cores={args.shovill_cpu_cores}"
+    
+    if args.prokka_cpu_cores:
+        command += f" prokka_cpu_cores={args.prokka_cpu_cores}"
+    
+    if args.roary_cpu_cores:
+        command += f" roary_cpu_cores={args.roary_cpu_cores}"
     
     command += f" install_path={path}"
 
