@@ -189,6 +189,8 @@ rule shovill:
         R2="raw_data/{sample}_L001_R2_001.fastq.gz"
     output:
         assembly="results/{sample}/shovill/contigs.fa"
+    threads:
+        shovill_cpus
     conda:
         "shovill_env.yml"
     shell:
@@ -242,13 +244,7 @@ rule prokka:
     conda:
         "prokka_env.yml"
     shell:
-        """
-            conda run -n prokka_env prokka --centre X \
-            --compliant {input.assembly} \
-            --outdir results/{wildcards.sample}/prokka/ \
-            --force \
-            --prefix {wildcards.sample}
-        """ + f"--cpus {prokka_cpus}"
+        "conda run -n prokka_env prokka --centre X --compliant {input.assembly} --outdir results/{wildcards.sample}/prokka/" + f" --force --cpus {prokka_cpus}" + " --prefix {wildcards.sample}"
 
 checkpoint build_dataframe:
     input:

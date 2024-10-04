@@ -57,26 +57,20 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 - Pegas should then work almost out of the box just by activating the **pegas** environment and running:
 
 	```bash
-	pegas --data path/to/raw/data --output path/to/output/folder
-	```
-
-	```text
-	usage: pegas [-h] --d D --o O [--s S] [--c C] [--overwrite]
-             [--rerun-pangenome]
-
-	
-	optional arguments:
-	-h, --help          show this help message and exit
-	--d D, --data D     The data directory, with all the fastq.gz files
-	--o O, --output O   The output directory
-	--s S, --samples S  The path to a text file with the list of samples to be
-						processed, each on a new line
-	--c C, --cores C    The number of cores to use
-	--overwrite         Overwrite the output directory if it exists
-	--rerun-pangenome   Rerun the pangenome analysis; sometimes pipeline can
-						crash during pangenome analysis; This command will
-						delete all data computed regarding pangenome and start
-						all over
+	options:
+	-h, --help            show this help message and exit
+	--d D, --data D       The data directory, with all the fastq.gz files
+	--o O, --output O     The output directory
+	--s S, --samples S    The path to a text file with the list of samples to be processed, each on a new line
+	--c C, --cores C      The number of cores to use
+	--overwrite           Overwrite the output directory if it exists
+	--rerun-pangenome     Rerun the pangenome analysis; sometimes pipeline can crash during pangenome analysis; This command will delete all data computed regarding pangenome and start all over
+	--shovill-cpu-cores SHOVILL_CPU_CORES
+							Number of CPU cores to use for shovill
+	--prokka-cpu-cores PROKKA_CPU_CORES
+							Number of CPU cores to use for prokka
+	--roary-cpu-cores ROARY_CPU_CORES
+							Number of CPU cores to use for roary
 	```
 ### 3.  Visualising the results
 - After the files have been processed and the analysis is completed, you can visualise the results in the path, in the report folder and all the resulting files in the results folder
