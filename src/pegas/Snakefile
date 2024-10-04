@@ -69,21 +69,30 @@ if "pangenome" in os.listdir():
     # Delete files that are not in the list of samples from the pangenome folder 
     for species in os.listdir(f"{outdir}/pangenome"):
         for file in os.listdir(f"pangenome/{species}"):
+            
+            if "output_" in file:
+                os.system(f"rm -rf {outdir}/pangenome/{species}/{file}")
 
             # If the file is not in the list of samples delete it
-            if file.replace(".gff", "") not in list_of_samples:
-                os.system(f"rm {outdir}/pangenome/{species}/{file}")
+            if file.replace(".gff", "") not in list_of_samples and not file == "output":
 
-                if not os.path.exists(f"{outdir}/pangenome/{species}"):
+                tqdm.write(f"(pegas)Deleting {file} from pangenome/{species}")
+                os.system(f"rm {outdir}pangenome/{species}/{file}")
+
+                if not os.path.exists(f"{outdir}pangenome/{species}"):
                     continue
 
                 # Should also delete the pangenomic analysis since it is not valid anymore
                 if "output" in os.listdir(f"{outdir}/pangenome/{species}"):
                     os.system(f"rm -rf {outdir}/pangenome/{species}/output")
-
+                
                 # If the species folder is left with only one file delete it
                 if len(os.listdir(f"{outdir}/pangenome/{species}")) < 2:
                     os.system(f"rm -rf {outdir}/pangenome/{species}")
+                
+                # Delete ./flags/.pangenome since it is not valid anymore
+                if ".pangenome" in os.listdir(f"{outdir}/flags"):
+                    os.system(f"rm {outdir}/flags/.pangenome")
 
 file_dict = {}
 file_set = set()
@@ -166,6 +175,8 @@ rule fastqc:
     output:
         R1="results/{sample}/fastqc/{sample}_L001_R1_001_fastqc.html",
         R2="results/{sample}/fastqc/{sample}_L001_R2_001_fastqc.html"
+    conda:
+        "fastqc_env.yml"
     shell:
         "fastqc {input.R1} {input.R2} -o results/{wildcards.sample}/fastqc"
 
@@ -175,14 +186,18 @@ rule shovill:
         R2="raw_data/{sample}_L001_R2_001.fastq.gz"
     output:
         assembly="results/{sample}/shovill/contigs.fa"
+    conda:
+        "shovill_env.yml"
     shell:
-        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force --cpus 4"
+        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force --cpus 8"
 
 rule abricate_ncbi:
     input:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
         abricate="results/{sample}/abricate_ncbi.tsv"
+    conda:
+        "abricate_env.yml"
     shell:
         "abricate --db ncbi {input.assembly} > {output.abricate}"
 
@@ -191,6 +206,8 @@ rule abricate_plasmidfinder:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
         abricate="results/{sample}/abricate_plasmidfinder.tsv"
+    conda:
+        "abricate_env.yml"
     shell:
         "abricate --db plasmidfinder {input.assembly} > {output.abricate}"
 
@@ -199,6 +216,8 @@ rule abricate_vfdb:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
         abricate="results/{sample}/abricate_vfdb.tsv"
+    conda:
+        "abricate_env.yml"
     shell:
         "abricate --db vfdb {input.assembly} > {output.abricate}"
 
@@ -207,6 +226,8 @@ rule mlst:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
         mlst="results/{sample}/mlst.tsv"
+    conda:
+        "mlst_env.yml"
     shell:
         "mlst {input.assembly} > {output.mlst}"
 
@@ -222,7 +243,7 @@ rule prokka:
             conda run -n prokka_env prokka --centre X \
             --compliant {input.assembly} \
             --outdir results/{wildcards.sample}/prokka/ \
-            --force --cpus 4 \
+            --force --cpus 8 \
             --prefix {wildcards.sample}
         """
 
@@ -276,6 +297,8 @@ rule pangenome:
     output:
         "flags/.pangenome"
     run:
+
+        tqdm.write("(pegas)Running pangenome analysis")
         # Create folders in output directory for each species based on the dataframe
         df = pd.read_csv(input.dataframe)
 
@@ -302,13 +325,25 @@ rule pangenome:
             # Copy the samples to the corresponding folder
             for sample in samples:
                 if f"{sample}.gff" not in os.listdir(f"pangenome/{species}"):
+                    tqdm.write(f"(pegas)Copying {sample}.gff to pangenome/{species}")
                     os.system(
                         f"cp results/{sample}/prokka/{sample}.gff pangenome/{species}/{sample}.gff"
                     )
+        
         # Run roary for each species
         for species in eligeble_species:
-            os.system(f"roary pangenome/{species}/*.gff -f pangenome/{species}/output -e -n -p 4")
-
+            os.system(f"roary pangenome/{species}/*.gff -f pangenome/{species}/output -e -n -p 64")
+        
+        # If roary named the output output_{n}, where n can be any number beween 1 and 99999999 rename it to output
+        for species in eligeble_species:
+            list_of_files = os.listdir(f"pangenome/{species}")
+            # If there is a folder named output_{n} rename it to output
+            for file in list_of_files:
+                if "output_" in file:
+                    tqdm.write(f"(pegas)Renaming {file} to output")
+                    os.system(f"mv pangenome/{species}/{file} pangenome/{species}/output")
+                    
+        tqdm.write("(pegas)Pangenome analysis finished, planting flag")
         os.system("touch flags/.pangenome")
 
 rule build_report:

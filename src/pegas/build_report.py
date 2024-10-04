@@ -107,7 +107,7 @@ def build_report(html_string):
             'yanchor': 'top',
             'font': {'size': 20}
         },
-        height=max(300 + len(df_virulence_id.index)*2, 600)
+        height=max(300 + len(df_virulence_id.index)*10, 600)
     )
 
     heatmap_virulence_full_figure_coverage = fix_colorbar(heatmap_virulence_full_figure_coverage, facet=True, dtick=10)
@@ -170,7 +170,7 @@ def build_report(html_string):
             'yanchor': 'top',
             'font': {'size': 20}
         },
-        height=max(300 + len(df_virulence_id.index)*2, 600)
+        height=max(300 + len(df_virulence_id.index)*10, 600)
     )
 
     heatmap_plasmids_full_figure_coverage = fix_colorbar(heatmap_plasmids_full_figure_coverage, facet=True, dtick=10)
@@ -233,7 +233,7 @@ def build_report(html_string):
             'yanchor': 'top',
             'font': {'size': 20}
         },
-        height=max(300 + len(df_virulence_id.index)*2, 600)
+        height=max(300 + len(df_virulence_id.index)*10, 600)
     )
 
     heatmap_resistance_full_figure = fix_colorbar(heatmap_resistance_full_figure, facet=True, dtick=10)
@@ -598,7 +598,7 @@ def build_report(html_string):
         # Update the layout of the heatmap, update title and axist title font size
         # Also set title
         Heatmap_pangenomic.update_layout(
-            height=max(200 + len(df_pangenome.index)*2, 400),
+            height=max(200 + len(df_pangenome.index)*10, 400),
             title_font_size=20,
             xaxis=dict(title_font_size=18),
             yaxis=dict(title_font_size=18)
@@ -625,6 +625,11 @@ def build_report(html_string):
     )
 
     Scatter_contig_length.update_traces(marker_size=15)
+
+    # Update the length of the plot
+    Scatter_contig_length.update_layout(
+        height=1000
+    )
 
     Scatter_contig_length_code = create_html_element(Scatter_contig_length, "Scatter plot for assembly contigs")
 
