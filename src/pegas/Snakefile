@@ -300,52 +300,64 @@ rule pangenome:
     shell:
         """
         echo "(pegas)Running pangenome analysis"
-        
-        # Create folders in output directory for each species based on the dataframe
-        # Assumes you have already exported a species list outside of this rule or converted Python logic into shell
-        
-        mkdir -p pangenome
 
-        # Get eligible species for pangenome analysis (assumes list of species is available in a file)
-        eligeble_species=$(awk -F, 'NR>1 {print $1}' {input.dataframe})  # Modify based on dataframe structure
+        # Create pangenome directory if it does not exist
+        if [ ! -d "pangenome" ]; then
+            mkdir pangenome
+        fi
 
-        # For every species, get the samples associated with that species and copy their gffs from prokka in their corresponding folder
+        # Read eligible species from dataframe
+        eligeble_species=$(python -c "
+import pandas as pd
+df = pd.read_csv('{input.dataframe}')
+df_grouped = df.groupby('SPECIES').count().reset_index()
+eligeble_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
+print(' '.join(eligeble_species))
+        ")
+
+        # Iterate over each species and process
         for species in $eligeble_species; do
-            samples=$(awk -F, -v sp=$species '$2==sp {print $3}' {input.dataframe})  # Modify for your dataframe structure
-            
-            mkdir -p pangenome/$species
 
-            # If the folder already exists delete it
-            rm -rf pangenome/$species/output
+            # Create species directory if it does not exist
+            if [ ! -d "pangenome/$species" ]; then
+                mkdir pangenome/$species
+            fi
 
-            # Copy the samples to the corresponding folder
+            # Remove any existing output folder for species
+            if [ -d "pangenome/$species/output" ]; then
+                rm -rf "pangenome/$species/output"
+            fi
+
+            # Get associated samples for the species and copy GFF files
+            samples=$(python -c "
+import pandas as pd
+df = pd.read_csv('{input.dataframe}')
+samples = df.loc[df['SPECIES'] == '$species', 'SAMPLE'].tolist()
+print(' '.join(samples))
+            ")
+
             for sample in $samples; do
-                if [ ! -f pangenome/$species/${sample}.gff ]; then
-                    echo "(pegas)Copying ${sample}.gff to pangenome/$species"
-                    cp results/$sample/prokka/${sample}.gff pangenome/$species/
+                if [ ! -f "pangenome/$species/$sample.gff" ]; then
+                    echo "(pegas)Copying $sample.gff to pangenome/$species"
+                    cp "results/$sample/prokka/$sample.gff" "pangenome/$species/$sample.gff"
                 fi
             done
-        done
 
-        # Run roary for each species
-        for species in $eligeble_species; do
+            # Run roary for the species
             roary pangenome/$species/*.gff -f pangenome/$species/output -e -n -qc -z -p {roary_cpus} --mafft -r
-        done
 
-        # Rename output_{n} to output if necessary
-        for species in $eligeble_species; do
+            # Rename output folder if necessary
             for file in pangenome/$species/output_*; do
                 if [ -d "$file" ]; then
+                    mv "$file" "pangenome/$species/output"
                     echo "(pegas)Renaming $file to output"
-                    mv $file pangenome/$species/output
                 fi
             done
         done
 
         echo "(pegas)Pangenome analysis finished, planting flag"
-        touch {output}
+        touch flags/.pangenome
         """
-
 
 rule build_report:
     input:
