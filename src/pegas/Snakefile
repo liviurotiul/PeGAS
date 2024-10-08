@@ -295,12 +295,6 @@ rule pangenome:
         dataframe="dataframe/results.csv"
     output:
         "flags/.pangenome"
-    run:
-rule pangenome:
-    input:
-        dataframe="dataframe/results.csv"
-    output:
-        "flags/.pangenome"
     conda:
         "roary_env.yml"
     shell:
