@@ -6,3 +6,4 @@ include src/pegas/abricate_env.yml
 include src/pegas/mlst_env.yml
 include src/pegas/fastqc_env.yml
 include src/pegas/shovill_env.yml
+include src/pegas/roary_env.yml
