@@ -296,54 +296,62 @@ rule pangenome:
     output:
         "flags/.pangenome"
     run:
-
-        tqdm.write("(pegas)Running pangenome analysis")
+rule pangenome:
+    input:
+        dataframe="dataframe/results.csv"
+    output:
+        "flags/.pangenome"
+    conda:
+        "roary_env.yml"
+    shell:
+        """
+        echo "(pegas)Running pangenome analysis"
+        
         # Create folders in output directory for each species based on the dataframe
-        df = pd.read_csv(input.dataframe)
+        # Assumes you have already exported a species list outside of this rule or converted Python logic into shell
+        
+        mkdir -p pangenome
 
-        # Get eligeble species for pangenome analysis
-        eligeble_species = get_species_list_for_roary_unique()
+        # Get eligible species for pangenome analysis (assumes list of species is available in a file)
+        eligeble_species=$(awk -F, 'NR>1 {print $1}' {input.dataframe})  # Modify based on dataframe structure
 
-        if not os.path.exists(f"pangenome"):
-            os.system(f"mkdir pangenome")
-
-        # For every species get the samples associated with that species and copy theri
-        # gffs from prokka in their corresponding folder
-        for species in eligeble_species:
-
-            # Get the samples associated with the species
-            samples = df.loc[df["SPECIES"] == species, "SAMPLE"].tolist()
-
-            if not os.path.exists(f"pangenome/{species}"):
-                os.system(f"mkdir pangenome/{species}")
+        # For every species, get the samples associated with that species and copy their gffs from prokka in their corresponding folder
+        for species in $eligeble_species; do
+            samples=$(awk -F, -v sp=$species '$2==sp {print $3}' {input.dataframe})  # Modify for your dataframe structure
+            
+            mkdir -p pangenome/$species
 
             # If the folder already exists delete it
-            if os.path.exists(f"pangenome/{species}/output"):
-                os.system(f"rm -rf pangenome/{species}/output")
+            rm -rf pangenome/$species/output
 
             # Copy the samples to the corresponding folder
-            for sample in samples:
-                if f"{sample}.gff" not in os.listdir(f"pangenome/{species}"):
-                    tqdm.write(f"(pegas)Copying {sample}.gff to pangenome/{species}")
-                    os.system(
-                        f"cp results/{sample}/prokka/{sample}.gff pangenome/{species}/{sample}.gff"
-                    )
-        
+            for sample in $samples; do
+                if [ ! -f pangenome/$species/${sample}.gff ]; then
+                    echo "(pegas)Copying ${sample}.gff to pangenome/$species"
+                    cp results/$sample/prokka/${sample}.gff pangenome/$species/
+                fi
+            done
+        done
+
         # Run roary for each species
-        for species in eligeble_species:
-            os.system(f"roary pangenome/{species}/*.gff -f pangenome/{species}/output -e -n -p {roary_cpus}")
-        
-        # If roary named the output output_{n}, where n can be any number beween 1 and 99999999 rename it to output
-        for species in eligeble_species:
-            list_of_files = os.listdir(f"pangenome/{species}")
-            # If there is a folder named output_{n} rename it to output
-            for file in list_of_files:
-                if "output_" in file:
-                    tqdm.write(f"(pegas)Renaming {file} to output")
-                    os.system(f"mv pangenome/{species}/{file} pangenome/{species}/output")
-                    
-        tqdm.write("(pegas)Pangenome analysis finished, planting flag")
-        os.system("touch flags/.pangenome")
+        for species in $eligeble_species; do
+            roary pangenome/$species/*.gff -f pangenome/$species/output -e -n -qc -z -p {roary_cpus} --mafft -r
+        done
+
+        # Rename output_{n} to output if necessary
+        for species in $eligeble_species; do
+            for file in pangenome/$species/output_*; do
+                if [ -d "$file" ]; then
+                    echo "(pegas)Renaming $file to output"
+                    mv $file pangenome/$species/output
+                fi
+            done
+        done
+
+        echo "(pegas)Pangenome analysis finished, planting flag"
+        touch {output}
+        """
+
 
 rule build_report:
     input:
