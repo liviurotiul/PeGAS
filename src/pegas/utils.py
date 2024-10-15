@@ -222,6 +222,25 @@ species_dict = {
     "-": "Unknown",
 }
 
+gc_content_dict = {
+    "Escherichia coli": "50.8",
+    "Streptomyces chromogenes": "72.1",
+    "Burkholderia pseudomallei": "68.8",
+    "Campylobacter (non-Jejuni)": "31.5",
+    "Mannheimia haemolytica": "41.5",
+    "Streptococcus zooepidemicus": "41.6",
+    "Salmonella enterica": "52.2",
+    "Lactococcus lactis phage": "39.2",
+    "Klebsiella pneumoniae": "57.2",
+    "Enterococcus faecalis": "37.9",
+    "Enterobacter cloacae": "55.1",
+    "Acinetobacter baumannii": "39.0",
+    "Streptococcus agalactiae": "35.8",
+    "Enterococcus faecium": "37.9",
+    "Streptococcus suis": "41.8",
+    "Streptococcus pneumoniae": "39.7",
+    "Clostridium perfringens": "28.6"
+}
 
 def dilute_hex_color(hex_color, factor):
     # Convert hex color string to RGB tuple
@@ -401,3 +420,4 @@ def find_file(filename, search_path):
 
     # If the file was not found in any of the directories, return None
     return None
+

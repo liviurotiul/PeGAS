@@ -13,7 +13,6 @@ import math
 from itertools import permutations
 from bs4 import BeautifulSoup as bs
 from collections import Counter
-from math import sqrt
 from jinja2 import Template
 
 from utils import *
@@ -41,7 +40,8 @@ def build_report(html_string):
         '%COVERAGE': float,
         'PREDICTION_SOURCE': str,
         'CONTIG_LENGTH': int,
-        'CONTIG_COVERAGE': float
+        'CONTIG_COVERAGE': float,
+        'CONTIG_NUMBER': int
         })
 
     # Assigning colors to species
@@ -317,146 +317,7 @@ def build_report(html_string):
     )
     sunburst_figure_code = create_html_element(sunburst_figure, "MLST output - Sunburst chart")
 
-    # ========================= SAMPLES INFO =========================================================
-
-    # ______________ Network graph ____________________
-
-
-    samples = df['SAMPLE'].unique().tolist()
-
-    if len(samples) > 1:
-
-        sample_network_dict = {}
-
-        for item in samples:
-
-            if item in ['nan','-']:
-                continue
-
-            df_sample = df[df['SAMPLE'] == item]
-            df_sample = df_sample[['GENE', 'PREDICTION_SOURCE']]
-
-            # Extract the relevant data from df_samples
-            resistance_list = df_sample[df_sample['PREDICTION_SOURCE'] == 'NCBI']['GENE'].to_list()
-            plasmids_list = df_sample[df_sample['PREDICTION_SOURCE'] == 'PlasmidFinder']['GENE'].to_list()
-            virulence_list = df_sample[df_sample['PREDICTION_SOURCE'] == 'VFDB']['GENE'].to_list()
-
-            # Concatenate the three lists and convert to a set
-            item_set = set(itertools.chain.from_iterable(resistance_list + plasmids_list + virulence_list))
-
-            # Assign the set to the current item in the dictionary
-            sample_network_dict[item] = item_set
-
-        from_list = []
-        to_list = []
-        weight_list = []
-        common = {}
-        for (item_a, item_b) in permutations(sample_network_dict.keys(), 2):
-            if len(sample_network_dict[item_a] & sample_network_dict[item_b]) > 0:
-                from_list.append(item_a)
-                to_list.append(item_b)
-                weight_list.append(len(sample_network_dict[item_a] & sample_network_dict[item_b]))
-                common[(item_a, item_b)] = sample_network_dict[item_a] & sample_network_dict[item_b]
-
-        G = nx.Graph()
-        for i in range(len(samples)):
-            G.add_node(samples[i])
-
-        for x, y, w in zip(from_list, to_list, weight_list):
-            G.add_weighted_edges_from([(x, y, w)])
-            # print(from_list[i], to_list[i], weight_list[i])
-
-        pos = nx.spring_layout(G, k=2.5, iterations=200)
-
-        for n, p in pos.items():
-            G.nodes[n]['pos'] = p
-
-        Network_samples_figure = go.Figure()
-
-        # Step 1: Get all the weights
-        weights = weight_list
-
-        # Step 2: Sort the weights in descending order
-        sorted_weights = sorted(weights, reverse=True)
-
-        # Step 3: Calculate the index for the top 90%
-        top_90_index = int(len(sorted_weights) * 0.5)
-
-        # Step 4: Retrieve the weight at the top 90% index
-        threshold = sorted_weights[top_90_index]
-
-        tqdm.write(f"Threshold: {threshold}")
-
-        for edge in G.edges():
-            w = G.get_edge_data(*edge)['weight']
-            if w < threshold:
-                continue
-
-            x0, y0 = G.nodes[edge[0]]['pos']
-            x1, y1 = G.nodes[edge[1]]['pos']
-            edge_trace = go.Scatter(
-                x=[],
-                y=[],
-                showlegend=False,
-                legendgroup=df_samples[df_samples['SAMPLE']==edge[0]]['SPECIES'].to_list()[0],
-                line=dict(width=math.log(w), color='#888'),
-                hoverinfo='text',
-                mode='lines'
-            )
-
-            edge_trace['x'] = tuple([x0, x1, None])
-            edge_trace['y'] = tuple([y0, y1, None])
-
-            Network_samples_figure.add_trace(edge_trace)
-
-        node_traces = {}
-        for node in G.nodes():
-            x, y = G.nodes[node]['pos']
-            species = df_samples[df_samples['SAMPLE']==node]['SPECIES'].to_list()[0]
-            if not node_traces.get(species, None):
-                node_traces[species] = {'x': [], 'y':[], 'name':[], 'text':[]}
-            node_traces[species]['x'].append(x)
-            node_traces[species]['y'].append(y)
-            node_traces[species]['name'].append(node)
-            node_traces[species]['text'].append(node)
-
-            Network_samples_figure.add_trace(
-                go.Scatter(
-                    x=(x,),
-                    y=(y,),
-                    mode='markers',
-                    legendgroup=species,
-                    legendgrouptitle_text=species,
-                    hovertemplate=node,
-                    name=node,
-                    marker=dict(
-                        color=species_color_mapping[species_dict[species]],
-                        size=8,
-                        line=dict(width=0)
-                    )
-                )
-            )
-
-        Network_samples_figure.update_layout(
-            showlegend=True,
-            hovermode='closest',
-            title="Virulence, plasmid and resistance: graph network",
-            margin=dict(b=20,l=5,r=5,t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            height=700,
-            annotations=[
-                dict(
-                    showarrow=False,
-                    xref="paper", yref="paper",
-                    x=0.005, y=-0.002
-                )
-            ]
-        )
-        Network_samples_figure_code = create_html_element(Network_samples_figure, "VFDB, Plasmid finder, Resistance outputs - network graph")
-
-    else:
-        Network_samples_figure_code = "<p>Only one sample was found in the dataset. A network graph cannot be created.</p>"
+    # # ========================= SAMPLES INFO =========================================================
 
     # ______________ Table _____________________
 
@@ -470,17 +331,15 @@ def build_report(html_string):
         'SUBTYPE': 'first',
         'SPECIES': 'first',
         'CONTIG_LENGTH': 'first',
-        'CONTIG_COVERAGE': 'first'
+        'CONTIG_COVERAGE': 'first',
+        'CONTIG_NUMBER': 'first'
     }
-
-    # Group by sample and prediction source using the dictionary for aggregate functions
-    # df_table = df.groupby(['SAMPLE', 'PREDICTION_SOURCE']).agg(agg_funcs).reset_index()
-
 
     # Pivot table on teh values of the PREDICTION_SOURCE column
     df_table = df_table = df.pivot_table(index='SAMPLE',columns='PREDICTION_SOURCE',values='GENE',aggfunc=lambda x: x.tolist())
     df_table["SPECIES"] = df_table.index.map(sample_species)
     df_table["SUBTYPE"] = df_table.index.map(sample_subtype)
+    df_table["SPECIES"] = df_table["SPECIES"].map(species_dict)
 
     # Turn NaN to empty lists
     df_table = df_table.fillna('')
@@ -615,16 +474,17 @@ def build_report(html_string):
     df_samples = df.groupby("SAMPLE").agg({
         "CONTIG_LENGTH": "first",
         "CONTIG_COVERAGE": "first",
-        "SPECIES": "first"
+        "SPECIES": "first",
+        "CONTIG_NUMBER": "first"
     }).reset_index()
 
     # ______________________ Contig Plot _________________________
     Scatter_contig_length = px.scatter(df_samples, x='CONTIG_LENGTH', y='CONTIG_COVERAGE', color='SPECIES',
         color_discrete_map=species_color_mapping,
-        hover_data=['CONTIG_LENGTH', 'CONTIG_COVERAGE', 'SPECIES', 'SAMPLE']
+        hover_data=['CONTIG_LENGTH', 'CONTIG_COVERAGE', 'SPECIES', 'SAMPLE', 'CONTIG_NUMBER'],
     )
 
-    Scatter_contig_length.update_traces(marker_size=15)
+    Scatter_contig_length.update_traces(marker_size=25)
 
     # Update the length of the plot
     Scatter_contig_length.update_layout(
@@ -688,7 +548,30 @@ def build_report(html_string):
                         df_qc.loc[file_name, search_string+" R2"] = next_td.get_text().strip()
 
     for i in df_qc.index.to_list():
-        df_qc.loc[i, "SPECIES"] = df_samples[df_samples["SAMPLE"]==i]["SPECIES"].values[0]
+        df_qc.loc[i, "SPECIES"] = species_dict[df_samples[df_samples["SAMPLE"]==i]["SPECIES"].values[0]]
+
+    df_qc["Sequences flagged as poor quality R1"] = df_qc["Sequences flagged as poor quality R1"] + " (" + (df_qc["Sequences flagged as poor quality R1"].astype(int) / df_qc["Total Sequences R1"].astype(int) * 100).astype(str) + "%)"
+    df_qc["Sequences flagged as poor quality R2"] = df_qc["Sequences flagged as poor quality R2"] + " (" + (df_qc["Sequences flagged as poor quality R2"].astype(int) / df_qc["Total Sequences R2"].astype(int) * 100).astype(str) + "%)"
+
+    def compute_GC_intervalsR1(row):
+        
+        sp = row["SPECIES"]
+        if sp not in gc_content_dict.keys():
+            return row["%GC R1"] + "% (expected: N/A)"
+        
+        return row["%GC R1"] + "% (expected: " + gc_content_dict[sp] + "%)"
+    
+    df_qc["%GC R1"] = df_qc.apply(compute_GC_intervalsR1, axis=1)
+
+    def compute_GC_intervalsR2(row):
+        
+        sp = row["SPECIES"]
+        if sp not in gc_content_dict.keys():
+            return row["%GC R2"] + "% (expected: N/A)"
+        
+        return row["%GC R2"] + "% (expected: " + gc_content_dict[sp] + "%)"
+    
+    df_qc["%GC R2"] = df_qc.apply(compute_GC_intervalsR2, axis=1)
 
     # df.to_csv(f"{TABLES_PATH}/df_reads_table.csv", index=False)
     df_reads_table_code = df_qc.to_html()
@@ -702,6 +585,52 @@ def build_report(html_string):
     # Add a class and an ID to the table element
     df_reads_table_code['class'] = 'table table-striped'
     df_reads_table_code['id'] = 'full_qa_table'
+
+    # Define a function to apply colors based on the difference
+    def apply_color(td):
+
+        # Extract the actual and expected percentages using regex
+        actual_value = float(td.get_text().split('%')[0])  # Get the actual percentage value
+        expected_value = float(td.get_text().split('%')[1].split(" ")[-1])   # Get the expected percentage value
+        
+        # Calculate the difference
+        difference = abs(actual_value - expected_value)
+        
+        # Apply styles based on the difference
+        if difference > 6:
+            td['style'] = 'background-color: #f8d7da'  # Red
+        else:
+            td['style'] = 'background-color: #d4edda'  # Green
+
+    # Iterate through the rows and find the relevant cells
+    for row in df_reads_table_code.find_all('tr'):
+        for td in row.find_all('td'):
+            # Check if the cell matches the format "49% (expected: 50.8%)"
+            if "expected" in td.get_text():
+                apply_color(td)
+
+
+    # Define a function to apply colors based on the percentage
+    def apply_color(td):
+        # Extract the percentage from the text using regex
+        match = re.search(r'(\d+) \((\d+\.\d+)%\)', td.get_text())
+        if match:
+            percent_value = float(match.group(2))  # Get the float percentage value
+            
+            # Apply styles based on the percentage value
+            if percent_value < 5:
+                td['style'] = 'background-color: #d4edda'  # Green
+            elif 5 <= percent_value < 15:
+                td['style'] = 'background-color: #fff3cd'  # Yellow
+            elif percent_value >= 15:
+                td['style'] = 'background-color: #f8d7da'  # Red
+
+    # Iterate through the rows and find the relevant cells
+    for row in df_reads_table_code.find_all('tr'):
+        for td in row.find_all('td'):
+            # Check if the cell matches the format "integer (float%)"
+            if re.search(r'^\d+ \(\d+\.\d+%\)$', td.get_text()):
+                apply_color(td)
 
     for th in df_reads_table_code.find_all('th'):
         th['style'] = 'text-align: left'
@@ -760,24 +689,17 @@ def build_report(html_string):
 
     # Define the visualizations dictionary with descriptive titles as keys and visualization codes as values
     visualizations = {
-        "Sunburst Chart": sunburst_figure_code,
+        "MLST Sunburst Plot": sunburst_figure_code,
         "Virulence Heatmap": heatmap_virulence_full_figure_coverage_code,
         "Plasmid Gene Heatmap": heatmap_plasmids_full_figure_coverage_code,
         "Resistance Heatmap": heatmap_resistance_full_figure_code,
-        # "Heatmap Virulence Species Figure": heatmap_virulence_species_figure_code,
-        # "Heatmap Plasmids Species Figure": heatmap_plasmids_species_figure_code,
-        # "Heatmap Resistance Figure": Heatmap_resistance_fig_code,
-        "Network Chart": Network_samples_figure_code,
-        "Subtype Pie Charts": subtype_html_string,
+        "Resistance Profile": subtype_html_string,
         "Pangenomic Heatmap": Heatmap_pangenomic_codes,
-        "QC Scatter Plot": Scatter_contig_length_code,
-        "QC Box Plot": Box_contig_length_code,
-        # "Virulome HTML String": virulome_html_string,
-        # "Plasmid HTML String": plasmid_html_string,
-        # "Resistome HTML String": resistome_html_string,
+        "Contig Length Scatter Plot": Scatter_contig_length_code,
+        "Contig Length Box Plot": Box_contig_length_code,
         "Gene Table": df_full_table_code,
-        "QC Table": df_reads_table_code,
-        "Pangenome Pie Chart": pangenome_pie_chart_codes
+        "FastQC Table": df_reads_table_code,
+        "Pangenomic Pie Chart": pangenome_pie_chart_codes
     }
 
     # Iterate over the items in the visualizations dictionary

@@ -63,6 +63,9 @@ def build_dataframe():
 
                         # Get the coverage of the longest contig cov=...
                         contig_coverage = float(re.findall(r"cov=(\d+.\d+)", contig_data)[0])
+
+                        # Number of contigs
+                        contig_number = len(re.findall(r">", contigs))
                 
                 # Read mlst.tsv and extract thesecond and third columns
                 # mlst.tsv has no header        
@@ -82,6 +85,7 @@ def build_dataframe():
             # Add the contig length and coverage columns
             df["CONTIG_LENGTH"] = contig_length
             df["CONTIG_COVERAGE"] = contig_coverage
+            df["CONTIG_NUMBER"] = contig_number
 
             # Add the SPECIES and SUBTYPE columns
             df["SPECIES"] = mlst["SPECIES"][0]
@@ -106,7 +110,8 @@ def build_dataframe():
             '%COVERAGE': float,
             'PREDICTION_SOURCE': str,
             'CONTIG_LENGTH': int,
-            'CONTIG_COVERAGE': float
+            'CONTIG_COVERAGE': float,
+            'CONTIG_NUMBER': int
             })
 
         # Save the results dataframe as a csv file

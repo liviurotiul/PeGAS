@@ -157,18 +157,17 @@ rule all:
             sample=sample_names
         ),
         pangenome_flag="flags/.pangenome",
-        Box_Contig_Length="report/QC_Box_Plot.html",
+        Box_Contig_Length="report/Contig_Length_Box_Plot.html",
         DF_Full_Table="report/Gene_Table.html",
-        DF_Reads_Table="report/QC_Table.html",
+        DF_Reads_Table="report/FastQC_Table.html",
         Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
         Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
         Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
         Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
-        Network_Samples_Figure="report/Network_Chart.html",
-        Pangenome_Pie_Chart="report/Pangenome_Pie_Chart.html",
-        Scatter_Contig_Length="report/QC_Scatter_Plot.html",
-        Subtype_HTML_String="report/Subtype_Pie_Charts.html",
-        Sunburst_Figure="report/Sunburst_Chart.html",
+        Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
+        Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
+        Subtype_HTML_String="report/Resistance_Profile.html",
+        Sunburst_Figure="report/MLST_Sunburst_Plot.html",
         flag="flags/.report"
 
 rule fastqc:
@@ -177,7 +176,9 @@ rule fastqc:
         R2="raw_data/{sample}_L001_R2_001.fastq.gz"
     output:
         R1="results/{sample}/fastqc/{sample}_L001_R1_001_fastqc.html",
-        R2="results/{sample}/fastqc/{sample}_L001_R2_001_fastqc.html"
+        R2="results/{sample}/fastqc/{sample}_L001_R2_001_fastqc.html",
+        ZIP1="results/{sample}/fastqc/{sample}_L001_R1_001_fastqc.zip",
+        ZIP2="results/{sample}/fastqc/{sample}_L001_R2_001_fastqc.zip"
     conda:
         "fastqc_env.yml"
     shell:
@@ -188,7 +189,11 @@ rule shovill:
         R1="raw_data/{sample}_L001_R1_001.fastq.gz",
         R2="raw_data/{sample}_L001_R2_001.fastq.gz"
     output:
-        assembly="results/{sample}/shovill/contigs.fa"
+        assembly="results/{sample}/shovill/contigs.fa",
+        gfa="results/{sample}/shovill/contigs.gfa",
+        corrections="results/{sample}/shovill/shovill.corrections",
+        log="results/{sample}/shovill/shovill.log",
+        spades="results/{sample}/shovill/spades.fasta"
     threads:
         shovill_cpus
     conda:
@@ -240,7 +245,18 @@ rule prokka:
     input:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
-        prokka="results/{sample}/prokka/{sample}.gff"
+        prokka="results/{sample}/prokka/{sample}.gff",
+        err="results/{sample}/prokka/{sample}.err",
+        faa="results/{sample}/prokka/{sample}.faa",
+        ffn="results/{sample}/prokka/{sample}.ffn",
+        fna="results/{sample}/prokka/{sample}.fna",
+        fsa="results/{sample}/prokka/{sample}.fsa",
+        gbk="results/{sample}/prokka/{sample}.gbk",
+        log="results/{sample}/prokka/{sample}.log",
+        sqn="results/{sample}/prokka/{sample}.sqn",
+        tbl="results/{sample}/prokka/{sample}.tbl",
+        tsv="results/{sample}/prokka/{sample}.tsv",
+        txt="results/{sample}/prokka/{sample}.txt"
     conda:
         "prokka_env.yml"
     shell:
@@ -344,7 +360,7 @@ print(' '.join(samples))
             done
 
             # Run roary for the species
-            roary pangenome/$species/*.gff -f pangenome/$species/output -e -n -qc -z -p {roary_cpus} --mafft -r
+            roary pangenome/$species/*.gff -f pangenome/$species/output -e -n -p {roary_cpus}
 
             # Rename output folder if necessary
             for file in pangenome/$species/output_*; do
@@ -363,18 +379,17 @@ rule build_report:
     input:
         pangenome="flags/.pangenome",
     output:
-        Box_Contig_Length="report/QC_Box_Plot.html",
+        Box_Contig_Length="report/Contig_Length_Box_Plot.html",
         DF_Full_Table="report/Gene_Table.html",
-        DF_Reads_Table="report/QC_Table.html",
+        DF_Reads_Table="report/FastQC_Table.html",
         Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
         Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
         Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
         Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
-        Network_Samples_Figure="report/Network_Chart.html",
-        Pangenome_Pie_Chart="report/Pangenome_Pie_Chart.html",
-        Scatter_Contig_Length="report/QC_Scatter_Plot.html",
-        Subtype_HTML_String="report/Subtype_Pie_Charts.html",
-        Sunburst_Figure="report/Sunburst_Chart.html",
+        Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
+        Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
+        Subtype_HTML_String="report/Resistance_Profile.html",
+        Sunburst_Figure="report/MLST_Sunburst_Plot.html",
         flag="flags/.report"
     run:
         build_report(html_string)
