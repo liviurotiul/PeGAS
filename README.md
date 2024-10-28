@@ -50,7 +50,7 @@ This is PeGAS, a powerful bioinformatic tool designed for the seamless quality c
 - PeGAS is easily installable with conda; just open a terminal and run this command:
 
 
-		conda info
+		conda install bioconda::pegas
 
 ### 3.  Using PeGAS
 
