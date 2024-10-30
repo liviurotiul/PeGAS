@@ -291,6 +291,8 @@ def build_report(html_string):
             diluted_color = dilute_hex_color(species_color_mapping[species_dict[species]], 0.1)
             colors.append(diluted_color)
 
+    import pdb; pdb.set_trace()
+
     sunburst_data = {
         "label": label,
         'parent': parent,
@@ -588,6 +590,9 @@ def build_report(html_string):
 
     # Define a function to apply colors based on the difference
     def apply_color(td):
+
+        if "N/A" in td.get_text():
+            td['style'] = 'background-color: #f8d7da'  # Red
 
         # Extract the actual and expected percentages using regex
         actual_value = float(td.get_text().split('%')[0])  # Get the actual percentage value
