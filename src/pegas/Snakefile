@@ -1,160 +1,95 @@
-import itertools
+import os
+import re
+import shutil
 import pandas as pd
-import time
+import warnings
+
+from glob import glob
 from tqdm import tqdm
-from utils import species_dict
 from build_dataframe import build_dataframe
 from build_report import build_report
 
+warnings.filterwarnings("ignore")
+
+# Load configuration variables
 raw_data_path = config.get("raw_data", None)
 list_of_samples = config.get("samples", None)
-outdir = config.get("outdir", None)
-overwrite = config.get("overwrite", True)
 install_path = config.get("install_path", None)
 shovill_cpus = config.get("shovill_cpu_cores", 1)
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 
+# Ensure the raw_data directory exists
+os.makedirs("raw_data", exist_ok=True)
+
 with open(f"{install_path}/layout.html", 'r') as file:
     html_string = file.read()
 
-if not outdir:
-    raise ValueError("Output directory not specified")
+# ================= Utility Functions =================
 
-if os.path.exists(outdir) and not overwrite:
-    # Add the execution time to the output directory
-    outdir = outdir + "_" + str(time.time())
+def list_fastq_files(path):
+    """Returns a list of all .fastq.gz files in the specified path."""
+    return [f for f in glob(os.path.join(path, "*.fastq.gz"))]
 
-if not os.path.exists(outdir):
-    os.system(f"mkdir {outdir}")
+def get_core_sample_name(filename):
+    """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
+    pattern = re.compile(r'^(?P<sample>.+?)[_\.\-]?R[12].*\.fastq\.gz$', re.IGNORECASE)
+    match = pattern.match(os.path.basename(filename))
+    return match.group("sample") if match else None
 
-workdir: outdir
-
-if not list_of_samples:
-
-    list_of_samples = os.listdir(raw_data_path)
-    R1 = [f.replace("_L001_R1_001.fastq.gz", "") for f in list_of_samples if f.endswith("_L001_R1_001.fastq.gz")]
-    R2 = [f.replace("_L001_R2_001.fastq.gz", "") for f in list_of_samples if f.endswith("_L001_R2_001.fastq.gz")]
-    list_of_samples = list(set(R1+R2))
-
-else:
-    # Read list of samples; it is a text file with one sample name per line
-    with open(list_of_samples, 'r') as f:
-        list_of_samples = f.read().splitlines()
-
-# Make the list of files by adding the R1 and R2 to the sample name
-R1_files = [f"{sample}_L001_R1_001.fastq.gz" for sample in list_of_samples]
-R2_files = [f"{sample}_L001_R2_001.fastq.gz" for sample in list_of_samples]
-list_of_files = R1_files + R2_files
-
-if not os.path.exists(f"{outdir}/raw_data"):
-    os.system(f"mkdir {outdir}/raw_data")
-
-# Copy the contents of raw_data_path to the raw_data folder in the working directory
-# Skipping the ones that already exist
-# Only copy the files that are in the list_of_files
-for file in tqdm(list_of_files):
-    if file not in os.listdir(f"{outdir}/raw_data"):
-        os.system(f"cp {raw_data_path}/{file} {outdir}/raw_data")
-
-# Delete files that are not in the list of samples
-for file in os.listdir(f"{outdir}/raw_data"):
-    if file not in list_of_files:
-        os.system(f"rm -rf {outdir}/raw_data/{file}")
-
-if "results" in os.listdir():
-    # Delete files that are not in the list of samples from the results folder
-    for folder in os.listdir(f"{outdir}/results"):
-        if folder not in list_of_samples:
-            os.system(f"rm -rf {outdir}/results/{folder}")
-
-if "pangenome" in os.listdir():
-    # Delete files that are not in the list of samples from the pangenome folder 
-    for species in os.listdir(f"{outdir}/pangenome"):
-        for file in os.listdir(f"pangenome/{species}"):
-            
-            if "output_" in file:
-                os.system(f"rm -rf {outdir}/pangenome/{species}/{file}")
-
-            # If the file is not in the list of samples delete it
-            if file.replace(".gff", "") not in list_of_samples and not file == "output":
-
-                tqdm.write(f"(pegas)Deleting {file} from pangenome/{species}")
-                os.system(f"rm {outdir}/pangenome/{species}/{file}")
-
-                if not os.path.exists(f"{outdir}/pangenome/{species}"):
-                    continue
-
-                # Should also delete the pangenomic analysis since it is not valid anymore
-                if "output" in os.listdir(f"{outdir}/pangenome/{species}"):
-                    os.system(f"rm -rf {outdir}/pangenome/{species}/output")
-                
-                # If the species folder is left with only one file delete it
-                if len(os.listdir(f"{outdir}/pangenome/{species}")) < 2:
-                    os.system(f"rm -rf {outdir}/pangenome/{species}")
-                
-                # Delete ./flags/.pangenome since it is not valid anymore
-                if ".pangenome" in os.listdir(f"{outdir}/flags"):
-                    os.system(f"rm {outdir}/flags/.pangenome")
-
-file_dict = {}
-file_set = set()
-
-files = os.listdir(f"{outdir}/raw_data")
-files = [f for f in files if f.endswith('.fastq.gz')]
-
-# Exclude files that are copies of other files
-files = [f for f in files if not any([f"({i})" in f for i in range(10)])]
-
-# Process each file
-for f in tqdm(files, desc="Processing files"):
-
-    entry_name = f.replace('_R1', '').replace('_R2', '').replace('.fastq.gz', '')
-    file_dict.setdefault(entry_name, []).append(f)
-    file_set.add(entry_name)
-
-for entry in file_set:
-    if len(file_dict[entry]) != 2:
-        raise ValueError(f"Entry {entry} does not have a pair of files")
-
-fastq_file_names = [sorted([R1, R2]) for R1, R2 in file_dict.values()]
-
-sample_names = [file[0].replace("_L001_R1_001.fastq.gz", "") for file in fastq_file_names]
+def build_fastq_pairs(fastq_files):
+    """Pairs R1 and R2 files based on sample names."""
+    pairs = {}
+    for file in fastq_files:
+        sample = get_core_sample_name(file)
+        if sample:
+            if sample not in pairs:
+                pairs[sample] = {}
+            if "_R1" in file or "R1" in file:
+                pairs[sample]["R1"] = file
+            elif "_R2" in file or "R2" in file:
+                pairs[sample]["R2"] = file
+    # Filter out incomplete pairs
+    return {s: p for s, p in pairs.items() if "R1" in p and "R2" in p}
 
 
+# ================= Data Preparation =================
+
+fastq_files = list_fastq_files("raw_data")
+file_names = [os.path.basename(f).replace(".fastq.gz", "") for f in fastq_files]
+sample_pairs = build_fastq_pairs(fastq_files)
+sample_names = list(sample_pairs.keys())
+
+# ================= Snakemake Workflow =================
 
 rule all:
     input:
-        # define fastqc output like data/results/fastqc/sample_name/R*
-        fastqc=expand(
-            "results/{sample}/fastqc/{sample}_L001_R{read}_001_fastqc.html",
-            sample=sample_names,
-            read=[1,2]
-        ),
+        html=expand("fastqc/{file}_fastqc.html", file=file_names),
+        html_zip=expand("fastqc/{file}_fastqc.zip", file=file_names),
         shovill=expand(
             "results/{sample}/shovill/contigs.fa",
-            sample=sample_names
+            sample=sample_pairs.keys()
         ),
-        abricate_ncvi=expand(
+        abricate_ncbi=expand(
             "results/{sample}/abricate_ncbi.tsv",
-            sample=sample_names
+            sample=sample_pairs.keys()
         ),
         abricate_plasmidfinder=expand(
             "results/{sample}/abricate_plasmidfinder.tsv",
-            sample=sample_names
+            sample=sample_pairs.keys()
         ),
         abricate_vfdb=expand(
             "results/{sample}/abricate_vfdb.tsv",
-            sample=sample_names
+            sample=sample_pairs.keys()
         ),
         mlst=expand(
             "results/{sample}/mlst.tsv",
-            sample=sample_names
+            sample=sample_pairs.keys()
         ),
         dataframe="dataframe/results.csv",
         prokka=expand(
             "results/{sample}/prokka/{sample}.gff",
-            sample=sample_names
+            sample=sample_pairs.keys()
         ),
         pangenome_flag="flags/.pangenome",
         Box_Contig_Length="report/Contig_Length_Box_Plot.html",
@@ -172,22 +107,22 @@ rule all:
 
 rule fastqc:
     input:
-        R1="raw_data/{sample}_L001_R1_001.fastq.gz",
-        R2="raw_data/{sample}_L001_R2_001.fastq.gz"
+        fastq_files="raw_data/{file}.fastq.gz"
     output:
-        R1="results/{sample}/fastqc/{sample}_L001_R1_001_fastqc.html",
-        R2="results/{sample}/fastqc/{sample}_L001_R2_001_fastqc.html",
-        ZIP1="results/{sample}/fastqc/{sample}_L001_R1_001_fastqc.zip",
-        ZIP2="results/{sample}/fastqc/{sample}_L001_R2_001_fastqc.zip"
+        html="fastqc/{file}_fastqc.html",
+        html_zip="fastqc/{file}_fastqc.zip",
     conda:
         "fastqc_env.yml"
     shell:
-        "fastqc {input.R1} {input.R2} -o results/{wildcards.sample}/fastqc"
+        """
+        mkdir -p fastqc
+        fastqc {input.fastq_files} -o fastqc
+        """
 
 rule shovill:
     input:
-        R1="raw_data/{sample}_L001_R1_001.fastq.gz",
-        R2="raw_data/{sample}_L001_R2_001.fastq.gz"
+        R1=lambda wildcards: sample_pairs[wildcards.sample]["R1"],
+        R2=lambda wildcards: sample_pairs[wildcards.sample]["R2"]
     output:
         assembly="results/{sample}/shovill/contigs.fa",
         gfa="results/{sample}/shovill/contigs.gfa",
@@ -199,7 +134,7 @@ rule shovill:
     conda:
         "shovill_env.yml"
     shell:
-        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force " + f"--cpus {shovill_cpus}"
+        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force --cpus {threads}"
 
 rule abricate_ncbi:
     input:
@@ -260,10 +195,12 @@ rule prokka:
     conda:
         "prokka_env.yml"
     shell:
-        "conda run -n prokka_env prokka --centre X --compliant {input.assembly} --outdir results/{wildcards.sample}/prokka/" + f" --force --cpus {prokka_cpus}" + " --prefix {wildcards.sample}"
+        "prokka --centre X --compliant {input.assembly} --outdir results/{wildcards.sample}/prokka/" + f" --force --cpus {prokka_cpus}" + " --prefix {wildcards.sample}"
 
 checkpoint build_dataframe:
     input:
+        html=expand("fastqc/{file}_fastqc.html", file=file_names),
+        html_zip=expand("fastqc/{file}_fastqc.zip", file=file_names),
         abricate_ncbi=expand("results/{sample}/abricate_ncbi.tsv", sample=sample_names),
         abricate_plasmidfinder=expand("results/{sample}/abricate_plasmidfinder.tsv", sample=sample_names),
         abricate_vfdb=expand("results/{sample}/abricate_vfdb.tsv", sample=sample_names),
@@ -276,7 +213,7 @@ checkpoint build_dataframe:
 
 # Helper function to get the species based on the sample
 def get_species_list_for_roary():
-    df = pd.read_csv("dataframe/results.csv")
+    df = pd.read_csv("dataframe/results.csv", dtype={'SAMPLE': str})
 
     # Group by species and samples
     df = df.groupby(["SPECIES", "SAMPLE"]).size().reset_index()
@@ -294,7 +231,7 @@ def get_species_list_for_roary():
     return df.loc[df["SPECIES"].isin(eligeble_species), "SPECIES"].tolist()
 
 def get_species_list_for_roary_unique():
-    df = pd.read_csv("dataframe/results.csv")
+    df = pd.read_csv("dataframe/results.csv", dtype={'SAMPLE': str})
 
     # Group by species and samples
     df = df.groupby(["SPECIES", "SAMPLE"]).size().reset_index()
@@ -306,74 +243,33 @@ def get_species_list_for_roary_unique():
 
     return list(set(df.loc[df["SPECIES"].isin(eligeble_species), "SPECIES"].tolist()))
 
+def get_pangenome_prokka_outputs(wildcards):
+    # Get the output of the build_dataframe checkpoint
+    df_output = checkpoints.build_dataframe.get().output[0]
+    df = pd.read_csv(df_output, dtype={'SAMPLE': str})
+    
+    # Get species with more than one sample
+    df_grouped = df.groupby('SPECIES')['SAMPLE'].nunique().reset_index()
+    eligible_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
+    
+    # Get the list of Prokka outputs needed
+    prokka_files = []
+    for species in eligible_species:
+        samples = df.loc[df['SPECIES'] == species, 'SAMPLE'].unique()
+        for sample in samples:
+            prokka_files.append(f"results/{sample}/prokka/{sample}.gff")
+    return prokka_files
+
 rule pangenome:
     input:
-        dataframe="dataframe/results.csv"
+        dataframe="dataframe/results.csv",
+        prokka_outputs=get_pangenome_prokka_outputs
     output:
         "flags/.pangenome"
     conda:
         "roary_env.yml"
-    shell:
-        """
-        echo "(pegas)Running pangenome analysis"
-
-        # Create pangenome directory if it does not exist
-        if [ ! -d "pangenome" ]; then
-            mkdir pangenome
-        fi
-
-        # Read eligible species from dataframe
-        eligeble_species=$(python -c "
-import pandas as pd
-df = pd.read_csv('{input.dataframe}')
-df_grouped = df.groupby('SPECIES').count().reset_index()
-eligeble_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
-print(' '.join(eligeble_species))
-        ")
-
-        # Iterate over each species and process
-        for species in $eligeble_species; do
-
-            # Create species directory if it does not exist
-            if [ ! -d "pangenome/$species" ]; then
-                mkdir pangenome/$species
-            fi
-
-            # Remove any existing output folder for species
-            if [ -d "pangenome/$species/output" ]; then
-                rm -rf "pangenome/$species/output"
-            fi
-
-            # Get associated samples for the species and copy GFF files
-            samples=$(python -c "
-import pandas as pd
-df = pd.read_csv('{input.dataframe}')
-samples = df.loc[df['SPECIES'] == '$species', 'SAMPLE'].tolist()
-print(' '.join(samples))
-            ")
-
-            for sample in $samples; do
-                if [ ! -f "pangenome/$species/$sample.gff" ]; then
-                    echo "(pegas)Copying $sample.gff to pangenome/$species"
-                    cp "results/$sample/prokka/$sample.gff" "pangenome/$species/$sample.gff"
-                fi
-            done
-
-            # Run roary for the species
-            roary pangenome/$species/*.gff -f pangenome/$species/output -e -n -p {roary_cpus}
-
-            # Rename output folder if necessary
-            for file in pangenome/$species/output_*; do
-                if [ -d "$file" ]; then
-                    mv "$file" "pangenome/$species/output"
-                    echo "(pegas)Renaming $file to output"
-                fi
-            done
-        done
-
-        echo "(pegas)Pangenome analysis finished, planting flag"
-        touch flags/.pangenome
-        """
+    script:
+        "run_roary.py"
 
 rule build_report:
     input:

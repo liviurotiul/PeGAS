@@ -9,24 +9,26 @@ import matplotlib.pyplot as plt
 import plotly
 import matplotlib
 import math
+import warnings
 
 from itertools import permutations
 from bs4 import BeautifulSoup as bs
 from collections import Counter
 from jinja2 import Template
+from tqdm import tqdm
 
 from utils import *
 from itertools import chain
 
 
 def build_report(html_string):
-
+    warnings.filterwarnings("ignore")
     matplotlib.use('Agg')
 
     # ========================= OVERVIEW =============================================================
 
     # Read results.csv
-    df = pd.read_csv("dataframe/results.csv")
+    df = pd.read_csv("dataframe/results.csv", dtype={'SAMPLE': str})
 
     # Set the columns to the correct data types
     df = df.astype({
@@ -242,7 +244,7 @@ def build_report(html_string):
 
     # if len(species_list) > 1:
 
-    #     #____________________ Virulence heatmap __________________
+    #____________________ Virulence heatmap __________________
 
     #____________Sunburst Chart________________
 
@@ -252,46 +254,55 @@ def build_report(html_string):
     node_info = []
     colors = []
 
+    # Grouping and preparing data
     df_samples = df.groupby(["SAMPLE", "SUBTYPE", "SPECIES"]).size().reset_index(name="count")
+    df_samples["SPECIES_COMMON_NAME"] = df_samples["SPECIES"].map(species_dict)
     sample_list = df_samples["SAMPLE"].unique().tolist()
 
     for _, sample in df_samples.iterrows():
+        # Use SPECIES_COMMON_NAME for species
+        subtype_species = f"ST{sample['SUBTYPE']}({sample['SPECIES_COMMON_NAME']})"
+        
+        # Append the sample label
         label.append(sample["SAMPLE"])
-        parent.append(sample["SUBTYPE"] + "~" + sample["SPECIES"])
+        parent.append(subtype_species)
         value.append(1)
-        if sample["SUBTYPE"] + "~" + sample["SPECIES"] not in label:
-            label.append(sample["SUBTYPE"] + "~" + sample["SPECIES"])
-            parent.append(sample["SPECIES"])
+        
+        # Check if the subtype-species combination has been added as a label
+        if subtype_species not in label:
+            label.append(subtype_species)
+            parent.append(sample["SPECIES_COMMON_NAME"])
             value.append(0)
-        if sample["SPECIES"] not in label:
-            label.append(sample["SPECIES"])
+        
+        # Check if the species has been added as a label
+        if sample["SPECIES_COMMON_NAME"] not in label:
+            label.append(sample["SPECIES_COMMON_NAME"])
             parent.append("")
             value.append(0)
 
     for par, item in zip(parent, label):
+        # Condition for species-level nodes
+        if item in df_samples["SPECIES_COMMON_NAME"].unique():
+            no_of_samples = df_samples[df_samples["SPECIES_COMMON_NAME"] == item].shape[0]
+            node_info.append(f"Number of isolates: {no_of_samples} <br> {round(no_of_samples / len(sample_list) * 100, 2)}% of total isolates")
+            colors.append(species_color_mapping[item])
 
-        if item in df_samples['SPECIES'].to_list():
-            no_of_samples = df_samples['SPECIES'].to_list().count(item)
-            node_info.append(f"Number of isolates: {no_of_samples} <br> {round(no_of_samples/len(sample_list), 2)*100}% from total number of isolates")
-            colors.append(species_color_mapping[species_dict[item]])
-
-        elif item.split("~")[0] in df_samples['SUBTYPE'].to_list():
-            subtype = item.split("~")[0]
-            species = item.split("~")[1]
-            no_of_samples = df_samples[df_samples['SPECIES'] == par]['SUBTYPE'].to_list().count(subtype)
-            node_info.append(f"Number of isolates: {no_of_samples} <br> {round(no_of_samples/len(sample_list), 2)*100}% from total from total number of isolates")
-            # species_corresponding_subtype = df_samples[df_samples["subtype"]==item.split("_")[0]]["species"].to_list()[0]
-            diluted_color = dilute_hex_color(species_color_mapping[species_dict[species]], 0.05)
+        # Condition for subtype-level nodes
+        elif item.split("(")[0].replace("ST", "") in df_samples["SUBTYPE"].astype(str).tolist():
+            subtype = item.split("(")[0].replace("ST", "")
+            species_common_name = item.split("(")[1].replace(")", "")
+            no_of_samples_species = df_samples[df_samples["SPECIES_COMMON_NAME"] == species_common_name]
+            no_of_samples_subtype = no_of_samples_species[no_of_samples_species["SUBTYPE"] == subtype].shape[0]
+            node_info.append(f"Number of isolates: {no_of_samples_subtype} <br> {round(no_of_samples_subtype / len(sample_list) * 100, 2)}% of total isolates")
+            diluted_color = dilute_hex_color(species_color_mapping[species_common_name], 0.05)
             colors.append(diluted_color)
 
-        elif item in df_samples['SAMPLE'].to_list():
+        # Condition for sample-level nodes
+        elif item in df_samples["SAMPLE"].tolist():
             node_info.append("")
-            species = par.split("~")[1]
-            # species_corresponding_subtype = df_samples[df_samples["name"]==item]["species"].to_list()[0]
-            diluted_color = dilute_hex_color(species_color_mapping[species_dict[species]], 0.1)
+            species_common_name = par.split("(")[1].replace(")", "")
+            diluted_color = dilute_hex_color(species_color_mapping[species_common_name], 0.1)
             colors.append(diluted_color)
-
-    import pdb; pdb.set_trace()
 
     sunburst_data = {
         "label": label,
@@ -496,64 +507,122 @@ def build_report(html_string):
     Scatter_contig_length_code = create_html_element(Scatter_contig_length, "Scatter plot for assembly contigs")
 
     # ______________________ Contig Box _________________________
-    Box_contig_length = px.box(df_samples, y='CONTIG_LENGTH', x='SPECIES', color='SPECIES', color_discrete_map=species_color_mapping)
+    # Generate the box plot for assembly contigs
+    Box_contig_length = px.box(
+        df_samples,
+        y='CONTIG_LENGTH',
+        x='SPECIES',
+        color='SPECIES',
+        color_discrete_map=species_color_mapping
+    )
     Box_contig_length_code = create_html_element(Box_contig_length, "Box plot for assembly contigs")
 
-    # Find all folders named fastqc in the results folder and subfolders recursively
-    # without using find_file function
-    # Extract the HTML files from the fastqc folders
+    # Find all HTML files in the 'results' directory and subdirectories
     html_files = []
-    for root, dirs, files in os.walk("results"):
+    for root, dirs, files in os.walk("fastqc"):
         for file in files:
             if file.endswith(".html"):
                 html_files.append(os.path.join(root, file))
 
-    # Define the strings we're looking for
+    # Define the strings we're looking for in the FastQC reports
     search_strings = ["Total Sequences", "Sequences flagged as poor quality", "Sequence length", "%GC"]
 
+    # Function to extract sample name from file path
+    def get_sample_name_from_file(file_path):
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        # Remove known suffixes and patterns related to lanes and reads
+        sample_name = re.sub(r'(_L\d{3})?(_R\d)?(_\d{3})?(_fastqc)?$', '', base_name)
+        return sample_name
+    
+    def get_core_sample_name(filename):
+        """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
+        pattern = re.compile(r'^(?P<sample>.+?)[_\.\-]?R[12].*\.fastq\.gz$', re.IGNORECASE)
+        match = pattern.match(os.path.basename(filename))
+        return match.group("sample") if match else None
+
+    # Function to extract read direction from file path
+    def get_read_direction_from_file(file_path):
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        match = re.search(r'_R(\d)', base_name)
+        if match:
+            return 'R' + match.group(1)
+        else:
+            # Try to infer from the directory structure if not in filename
+            if 'R1' in file_path or 'read1' in file_path.lower():
+                return 'R1'
+            elif 'R2' in file_path or 'read2' in file_path.lower():
+                return 'R2'
+            else:
+                return None
+
+    # Build a set of unique sample names
+    sample_names = set()
+    for file_path in html_files:
+        sample_name = get_core_sample_name(file_path)
+        sample_names.add(sample_name)
+
+    # Create the DataFrame with the corrected index
     df_qc = pd.DataFrame(
-        index=list(
-            set(
-                [os.path.splitext(os.path.basename(file_path))[0].replace("_L001_R1_001", "").replace("_L001_R2_001", "").replace("_fastqc", "") for file_path in html_files])),
-        columns=[x+" R1" for x in search_strings]+[x+" R2" for x in search_strings]+['SPECIES']
+        index=sorted(sample_names),
+        columns=[f"{x} R1" for x in search_strings] + [f"{x} R2" for x in search_strings] + ['SPECIES']
     )
 
-    # Get the unique index values
-    unique_indexes = df_qc.index.unique()
-
-    # Set the index of the DataFrame to the unique values
-    df_qc = df_qc.set_index(unique_indexes)
-
-    # Loop over each file path
+    # Loop over each file path and extract data
     for file_path in html_files:
-
         # Load the HTML file into BeautifulSoup
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding='utf-8') as f:
             soup = bs(f, "html.parser")
 
-        file_name = os.path.splitext(os.path.basename(file_path))[0].replace("_L001_R1_001", "").replace("_L001_R2_001", "").replace("_fastqc", "")
+        sample_name = get_core_sample_name(file_path)
+        read_direction = get_read_direction_from_file(file_path)
+
+        if read_direction is None:
+            tqdm.write(f"[pegas]Warning: Could not determine read direction for file '{file_path}'. Skipping.")
+            continue  # Skip files without read direction
 
         # Loop over each search string
         for search_string in search_strings:
-            # Find the td element with the search string as its contents
+            # Find the <td> element with the search string as its content
             td = soup.find("td", string=search_string)
 
-            # If the td element exists, extract the content of the next td element
+            # If the <td> element exists, extract the content of the next <td> element
             if td is not None:
                 next_td = td.find_next_sibling("td")
                 if next_td is not None:
+                    column_name = f"{search_string} {read_direction}"
+                    df_qc.loc[sample_name, column_name] = next_td.get_text().strip()
+                else:
+                    tqdm.write(f"[pegas]Warning: Next <td> element not found for '{search_string}' in file '{file_path}'.")
+            else:
+                tqdm.write(f"[pegas]Warning: '{search_string}' not found in file '{file_path}'.")
 
-                    if "R1" in file_path:
-                        df_qc.loc[file_name, search_string+" R1"] = next_td.get_text().strip()
+    # Assign 'SPECIES' to each sample in df_qc based on df_samples and species_dict
+    for sample_name in df_qc.index:
+        sample_row = df_samples[df_samples["SAMPLE"] == sample_name]
+        if not sample_row.empty:
+            species_code = sample_row["SPECIES"].values[0]
+            df_qc.loc[sample_name, "SPECIES"] = species_dict.get(species_code, 'Unknown')
+        else:
+            tqdm.write(f"[pegas]Warning: Sample '{sample_name}' not found in df_samples. Assigning 'Unknown' to SPECIES.")
+            df_qc.loc[sample_name, "SPECIES"] = 'Unknown'
 
-                    if "R2" in file_path:
-                        df_qc.loc[file_name, search_string+" R2"] = next_td.get_text().strip()
+    # Convert relevant columns to numeric, handling non-numeric values
+    numeric_columns = [col for col in df_qc.columns if any(x in col for x in ["Total Sequences", "Sequences flagged as poor quality"])]
+    for col in numeric_columns:
+        df_qc[col] = pd.to_numeric(df_qc[col], errors='coerce')
 
-    for i in df_qc.index.to_list():
-        df_qc.loc[i, "SPECIES"] = species_dict[df_samples[df_samples["SAMPLE"]==i]["SPECIES"].values[0]]
-
-    df_qc["Sequences flagged as poor quality R1"] = df_qc["Sequences flagged as poor quality R1"] + " (" + (df_qc["Sequences flagged as poor quality R1"].astype(int) / df_qc["Total Sequences R1"].astype(int) * 100).astype(str) + "%)"
-    df_qc["Sequences flagged as poor quality R2"] = df_qc["Sequences flagged as poor quality R2"] + " (" + (df_qc["Sequences flagged as poor quality R2"].astype(int) / df_qc["Total Sequences R2"].astype(int) * 100).astype(str) + "%)"
+    # Calculate percentages and format the 'Sequences flagged as poor quality' columns
+    for read_direction in ['R1', 'R2']:
+        total_sequences_col = f"Total Sequences {read_direction}"
+        poor_quality_col = f"Sequences flagged as poor quality {read_direction}"
+        if total_sequences_col in df_qc.columns and poor_quality_col in df_qc.columns:
+            # Avoid division by zero and handle missing data
+            total_sequences = df_qc[total_sequences_col].replace(0, pd.NA)
+            poor_quality_sequences = df_qc[poor_quality_col]
+            with pd.option_context('mode.use_inf_as_na', True):
+                percentage = (poor_quality_sequences / total_sequences * 100).round(2)
+            # Combine counts and percentages
+            df_qc[poor_quality_col] = poor_quality_sequences.fillna(0).astype(int).astype(str) + ' (' + percentage.fillna(0).astype(str) + '%)'
 
     def compute_GC_intervalsR1(row):
         
@@ -593,6 +662,7 @@ def build_report(html_string):
 
         if "N/A" in td.get_text():
             td['style'] = 'background-color: #f8d7da'  # Red
+            return
 
         # Extract the actual and expected percentages using regex
         actual_value = float(td.get_text().split('%')[0])  # Get the actual percentage value
@@ -617,18 +687,36 @@ def build_report(html_string):
 
     # Define a function to apply colors based on the percentage
     def apply_color(td):
-        # Extract the percentage from the text using regex
-        match = re.search(r'(\d+) \((\d+\.\d+)%\)', td.get_text())
+        """
+        Extracts the expected percentage from a table cell and applies color based on the value.
+        
+        Parameters:
+        td (bs4.element.Tag): The table cell containing the expected value.
+        
+        Returns:
+        None: Modifies the 'td' element in place by adding a 'style' attribute.
+        """
+        text = td.get_text().strip()
+        if "N/A" in text:
+            td['style'] = 'background-color: grey;'
+            return
+
+        match = re.search(r'expected:\s*([\d\.]+)%', text, re.IGNORECASE)
+        
         if match:
-            percent_value = float(match.group(2))  # Get the float percentage value
-            
-            # Apply styles based on the percentage value
-            if percent_value < 5:
-                td['style'] = 'background-color: #d4edda'  # Green
-            elif 5 <= percent_value < 15:
-                td['style'] = 'background-color: #fff3cd'  # Yellow
-            elif percent_value >= 15:
-                td['style'] = 'background-color: #f8d7da'  # Red
+            try:
+                expected_value = float(match.group(1))
+                if expected_value >= 50:
+                    color = 'green'
+                elif expected_value >= 30:
+                    color = 'yellow'
+                else:
+                    color = 'red'
+                td['style'] = f'background-color: {color};'
+            except ValueError:
+                td['style'] = 'background-color: white;'
+        else:
+            td['style'] = 'background-color: white;'
 
     # Iterate through the rows and find the relevant cells
     for row in df_reads_table_code.find_all('tr'):
