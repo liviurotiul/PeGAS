@@ -536,7 +536,7 @@ def create_subtype_polar_charts(df, species_dict):
 
         resistances = sorted(df_species['RESISTANCE'].unique())
 
-        if len(resistances) == 0 or len(subtypes) < 2:
+        if len(resistances) == 0:
             continue
 
         # Count the number of samples in each subtype
