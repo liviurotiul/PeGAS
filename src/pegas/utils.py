@@ -4,18 +4,18 @@ import fnmatch
 import shutil
 import subprocess
 import random
+import plotly.io as pio
 
 from tqdm import tqdm
 from subprocess import call
 from typing import List, Dict, Tuple
 
-
 def generate_color():
     # Generate a random hue value between 0 and 360 (in degrees)
     h = random.randint(0, 359)
-    # Set saturation and lightness values to fixed values
-    s = 90
-    l = 60
+    # Set saturation and lightness values for a pastel effect
+    s = 55  # Lower saturation for pastel effect
+    l = 70  # Higher lightness for pastel effect
     # Convert HSL to RGB and format as a hexadecimal color code
     r, g, b = hsl_to_rgb(h, s, l)
     return "#{:02x}{:02x}{:02x}".format(r, g, b)
@@ -72,6 +72,7 @@ def assign_colors(old_dict):
                 new_dict[value] = color
                 break
     return new_dict
+
 
 species_dict = {
     "liberibacter": "Liberibacter",
@@ -162,7 +163,7 @@ species_dict = {
     "ecoli": "Escherichia coli",
     "geotrichum": "Geotrichum species",
     "mcatarrhalis_achtman_6": "Moraxella catarrhalis (Achtman 6)",
-    "klebsiella": "Klebsiella species",
+    "klebsiella": "Klebsiella pneumoniae",
     "vcholerae_2": "Vibrio cholerae (El Tor biotype)",
     "vibrio": "Vibrio species",
     "hparasuis": "Haemophilus parasuis",
@@ -170,7 +171,7 @@ species_dict = {
     "pmultocida": "Pasteurella multocida",
     "spneumoniae": "Streptococcus pneumoniae",
     "diphtheria_3": "Corynebacterium diphtheriae (biovar mitis)",
-    "cronobacter": "Cronobacter species",
+    "cronobacter": "Cronobacter sakazakii",
     "mgallisepticum_2": "Mycoplasma gallisepticum (strain 2)",
     "vtapetis": "Vibrio tapetis",
     "chlamydiales": "Chlamydiales order",
@@ -324,7 +325,7 @@ def configure_pie_chart(pie_chart_figure):
     pie_chart_figure.update_layout(
         font=dict(
             family="Courier New, monospace",
-            size=15
+            size=20
         ),
         margin=dict(t=20, b=20, l=30, r=30),
     )
@@ -364,20 +365,95 @@ def find_html_files(path):
     return html_files
 
 
-def create_html_element(widget, title, width="8", min_height="300px"):
+# def create_html_element(widget, title, width="8", min_height="300px"):
 
-    # If /report doesn't exist, create it
-    if not os.path.exists("report"):
-        os.system("mkdir report")
+#     # If /report doesn't exist, create it
+#     if not os.path.exists("report"):
+#         os.system("mkdir report")
 
-    # If /report/figures/ doesn't exist, create it
-    if not os.path.exists("report/figures"):
-        os.system("mkdir report/figures")
+#     # If /report/figures/ doesn't exist, create it
+#     if not os.path.exists("report/figures"):
+#         os.system("mkdir report/figures")
 
-    widget.write_html(f"report/figures/{title}.html", full_html=False, include_plotlyjs='cdn')
-    f = open(f"report/figures/{title}.html")
-    code = create_html_widget(f.read(), title, width, min_height)
-    return code
+#     widget.write_html(f"report/figures/{title}.html", full_html=False, include_plotlyjs='cdn')
+#     f = open(f"report/figures/{title}.html")
+#     code = create_html_widget(f.read(), title, width, min_height)
+#     return code
+
+def create_html_element(widget, title):
+    """
+    Converts a Plotly figure to an HTML string suitable for embedding in a report.
+
+    Parameters:
+    - widget (go.Figure): The Plotly figure to convert.
+    - title (str): The title to display above the figure.
+
+    Returns:
+    - html_with_title (str): The HTML string containing the figure and optional title.
+    """
+    # Update the figure layout
+    widget.update_layout(
+        autosize=True,
+        height=600,  # Adjust height as needed
+        margin=dict(l=50, r=50, t=50, b=50),
+        title={
+            'text': title,
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 20}
+        },
+        # You can include other layout settings as needed
+    )
+
+    # Convert the Plotly figure to an HTML string
+    html_str = pio.to_html(
+        widget,
+        full_html=False,
+        include_plotlyjs='cdn',
+        config={'responsive': True}
+    )
+
+    # Wrap the HTML with a container if needed
+    html_with_title = f"""
+    <div class="figure-container">
+        {html_str}
+    </div>
+    """
+    return html_with_title
+
+def create_figure_with_table_json(widget, table_html, title, fig_id):
+    """
+    Converts a Plotly figure and an HTML table to JSON data for deferred rendering.
+
+    Parameters:
+    - widget (go.Figure): The Plotly figure.
+    - table_html (str): The HTML string of the data table.
+    - title (str): The title for the figure.
+    - fig_id (str): A unique identifier for the figure.
+
+    Returns:
+    - dict: A dictionary containing the figure data, table HTML, and metadata.
+    """
+    # Ensure the figure has a unique ID
+    if not fig_id:
+        raise ValueError("fig_id is required to uniquely identify the figure.")
+
+    # Update the figure layout if needed
+    widget.update_layout(
+        autosize=False,
+        margin=dict(l=50, r=50, t=50, b=50)
+    )
+
+    # Serialize the figure to JSON
+    fig_json = widget.to_json()
+
+    # Return a dictionary with the figure data and table HTML
+    return {
+        'fig_id': fig_id,
+        'fig_json': fig_json,
+        'title': title,
+        'table_html': table_html  # Add the table HTML to the dictionary
+    }
 
 
 def fix_colorbar(figure, facet, dtick=None):
@@ -407,7 +483,6 @@ def fix_colorbar(figure, facet, dtick=None):
     
     return figure
 
-
 def find_file(filename, search_path):
     """Recursively searches for a file in a given directory and its subdirectories."""
 
@@ -421,3 +496,310 @@ def find_file(filename, search_path):
     # If the file was not found in any of the directories, return None
     return None
 
+def create_figure_json(widget, title, fig_id):
+    """
+    Converts a Plotly figure to JSON data for deferred rendering.
+
+    Parameters:
+    - widget (go.Figure): The Plotly figure.
+    - title (str): The title for the figure.
+    - fig_id (str): A unique identifier for the figure.
+
+    Returns:
+    - dict: A dictionary containing the figure data and metadata.
+    """
+    # Ensure the figure has a unique ID
+    if not fig_id:
+        raise ValueError("fig_id is required to uniquely identify the figure.")
+
+    # Update the figure layout if needed
+    widget.update_layout(
+        autosize=True,
+        margin=dict(l=50, r=50, t=50, b=50)
+    )
+
+    # Serialize the figure to JSON
+    fig_json = widget.to_json()
+
+    # Return a dictionary with the figure data
+    return {
+        'fig_id': fig_id,
+        'fig_json': fig_json,
+        'title': title
+    }
+
+def create_figure_json_windrose(widget, title, fig_id):
+    """
+    Converts a Plotly figure to JSON data for deferred rendering.
+
+    Parameters:
+    - widget (go.Figure): The Plotly figure.
+    - title (str): The title for the figure.
+    - fig_id (str): A unique identifier for the figure.
+
+    Returns:
+    - dict: A dictionary containing the figure data and metadata.
+    """
+    # Ensure the figure has a unique ID
+    if not fig_id:
+        raise ValueError("fig_id is required to uniquely identify the figure.")
+
+    # Update the figure layout if needed
+    widget.update_layout(
+        autosize=True,
+        margin=dict(l=50, r=50, t=50, b=50)
+    )
+
+    # Serialize the figure to JSON
+    fig_json = widget.to_json()
+
+    # Return a dictionary with the figure data
+    return {
+        'fig_id': fig_id,
+        'fig_json': fig_json,
+        'title': title
+    }
+
+# Write a text html description of the sunburst chart that contains the genus and subtype of each of the samples. Describe that and then the fucntionalities of the sunburst chart
+sunburst_help_text_html = """
+<h3>Sample Composition</h3>
+<p>The sunburst chart shows the composition of the collection. Starting from the center, the chart is divided into segments representing the genera present in the samples. Each genus segment is further divided into subsegments representing the subtypes of the genus.
+Hover over each segment to view the genus and subtype of the sample.</p>
+<h3>Interactivity</h3>
+<ul>
+    <li>Click on a segment to zoom in and view the subtypes of the selected genus.</li>
+    <li>Click on the center of the chart to zoom out and return to the previous view.</li>
+</ul>
+"""
+
+fastqc_help_text_html = """
+<div>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The <strong>FastQC summary table</strong> provides an overview of key quality metrics for each of your sequencing samples. 
+        This table is designed to help you quickly assess the quality of your raw sequencing data before proceeding to downstream analyses.
+    </p>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Table Columns:</h4>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Total Sequences (R1 and R2):</strong> The total number of sequences (reads) for each read direction—forward (R1) and reverse (R2).</li>
+        <li><strong>Sequences Flagged as Poor Quality (R1 and R2):</strong> The number and percentage of sequences flagged as poor quality by FastQC, displayed as <code>Number (Percentage%)</code>.</li>
+        <li><strong>Sequence Length (R1 and R2):</strong> The length of the sequences for each read direction. Consistent lengths indicate proper sequencing.</li>
+        <li><strong>%GC Content (R1 and R2):</strong> The percentage of guanine (G) and cytosine (C) nucleotides in the sequences, displayed as <code>Actual% (expected: Expected%)</code>.</li>
+        <li><strong>Species:</strong> The species name associated with each sample.</li>
+    </ul>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Color Coding in %GC Columns:</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        To assist in data interpretation, the <strong>%GC</strong> content cells are color-coded:
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><span style="background-color: #d4edda; padding: 3px;">Light Green:</span> The actual %GC is within <strong>6%</strong> of the expected value, suggesting consistency with the species' genomic characteristics.</li>
+        <li><span style="background-color: #f8d7da; padding: 3px;">Light Red:</span> The actual %GC differs from the expected value by more than <strong>6%</strong>. This does not necessarily indicate a problem but suggests further investigation may be needed.</li>
+    </ul>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Interpreting the Table:</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        Use the table to evaluate sequencing quality:
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Low Poor Quality Sequences:</strong> Indicates good sequencing quality.</li>
+        <li><strong>High Poor Quality Sequences:</strong> May require investigation into sequencing conditions or sample integrity.</li>
+        <li><strong>%GC Deviations (Red):</strong> Could suggest contamination, sequencing bias, or natural genomic variation.</li>
+    </ul>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Action Steps for Unusual Results:</h4>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li>Review sample labeling and preparation procedures.</li>
+        <li>Examine FastQC detailed reports for additional metrics.</li>
+        <li>Verify sample purity and check for contamination sources.</li>
+        <li>Consult with the sequencing facility if necessary.</li>
+    </ul>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        <strong>Note:</strong> A red %GC cell is a prompt to investigate further and does not necessarily indicate an issue. Natural variation or technical factors might account for the deviation.
+    </p>
+    <p>
+    The FastQC summary table is a valuable tool for quickly assessing the quality and integrity of your sequencing data. While the color-coded indicators provide visual cues for potential issues, they are meant to guide further investigation rather than serve as definitive judgments.
+Remember: A red-colored cell in the %GC column is a prompt to look closer—it does not necessarily mean there is a problem. It is possible that the observed %GC variation is due to acceptable natural variation or technical factors that can be accounted for in your analysis.
+    </p>
+</div>
+
+"""
+
+assembly_qc_help_text_html = """
+<div>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The contig assembly quality plots provide insights into the quality and characteristics of the assembled genomes for each species in your dataset. These plots help you assess the assembly process, identify potential issues, and compare assembly metrics across samples and species.
+    </p>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">1. Cumulative Contig Length Plots</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        For each species, a cumulative contig length plot is generated, displaying the cumulative sum of contig lengths sorted in descending order for each sample.
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>X-Axis (Contig Index):</strong> Represents the index of contigs sorted from largest to smallest.</li>
+        <li><strong>Y-Axis (Cumulative Contig Length):</strong> Shows the cumulative length of contigs up to that index.</li>
+    </ul>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The plot highlights the <strong>N50</strong> value for each sample:
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><span style="color: red;"><strong>Red Segment:</strong></span> Indicates the portion of the cumulative length up to the N50 contig. This is the contig length at which half of the total assembly length is reached.</li>
+        <li><span style="color: #6c757d;"><strong>Remaining Line:</strong></span> Represents the rest of the contigs beyond the N50.</li>
+    </ul>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        <strong>Interpreting the Plot:</strong>
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li>A steeper curve suggests fewer contigs are needed to reach the total assembly length, indicating a more contiguous assembly.</li>
+        <li>A longer red segment (up to N50) means larger contigs contribute significantly to the assembly.</li>
+        <li>Comparing samples can reveal variations in assembly quality across different samples of the same species.</li>
+    </ul>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">2. N50 Contig Length Distribution Box Plot</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        This plot displays the distribution of N50 contig lengths across all samples, grouped by species.
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>X-Axis (Species):</strong> Different species in your dataset.</li>
+        <li><strong>Y-Axis (N50 Contig Length):</strong> The N50 values for the samples.</li>
+    </ul>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        <strong>Interpreting the Plot:</strong>
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li>Higher N50 values indicate better assembly continuity.</li>
+        <li>The spread of data points shows variability between samples.</li>
+        <li>Outliers can identify samples with unusually high or low N50 values, which may need further investigation.</li>
+    </ul>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">3. N50 Contig Coverage Box Plot</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        This plot illustrates the distribution of coverage at the N50 contig across all samples, grouped by species.
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>X-Axis (Species):</strong> Different species in your dataset.</li>
+        <li><strong>Y-Axis (N50 Contig Coverage):</strong> Coverage values at the N50 contig for the samples.</li>
+    </ul>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        <strong>Interpreting the Plot:</strong>
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li>Consistent coverage values suggest uniform sequencing depth.</li>
+        <li>Variations in coverage may indicate sequencing biases or issues with library preparation.</li>
+        <li>Outliers may highlight samples requiring further quality assessment.</li>
+    </ul>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Important Notes</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        <strong>N50 Value:</strong> The N50 is a commonly used metric in genomics to assess the quality of genome assemblies. It is the contig length such that 50% of the total assembly length is contained in contigs equal to or larger than this length.
+    </p>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        <strong>Interpreting High N50 and Coverage:</strong> While higher N50 and consistent coverage are generally positive indicators, they should be interpreted in the context of the organism's genome and the sequencing technology used.
+    </p>
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Action Steps if Issues are Observed</h4>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li>Review sequencing data quality and consider re-sequencing if necessary.</li>
+        <li>Check for contamination or mixed samples if unexpected results are observed.</li>
+        <li>Adjust assembly parameters or use alternative assembly tools for improvement.</li>
+    </ul>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        If you have questions or need assistance in interpreting these plots, please consult with a bioinformatics specialist.
+    </p>
+</div>
+"""
+
+resistome_help_text_html = """
+<div>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        This section provides insights into the distribution of resistance genes across different subtypes within a species. The interactive polar chart and the accompanying table are designed to help you explore and interpret the data effectively.
+    </p>
+
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">1. Understanding the Subtype Polar Chart</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The Subtype Polar Chart is a circular barplot that visualizes the average number of resistance genes per sample for each subtype within a species.
+    </p>
+
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Bars Represent Resistance Genes:</strong> Each bar corresponds to a subtype and represents the average number of resistance genes per sample for that subtype. The height of the bar indicates the average gene count.</li>
+        <li><strong>Ordering of Bars:</strong> The bars are ordered based on the average number of resistance genes per sample, with subtypes having higher averages appearing first.</li>
+        <li><strong>Color-Coded Resistances:</strong> Different resistance types are color-coded for easy identification. This allows you to see which resistances are most prevalent in each subtype.</li>
+        <li><strong>Center Line (Circular Line Plot):</strong> The center line that loops around the chart represents the number of samples belonging to each subtype. The position and size of the markers on this line indicate the sample count.</li>
+        <li><strong>Subtype Labels:</strong> Each subtype is labeled around the chart, making it easy to identify which bar corresponds to which subtype.</li>
+    </ul>
+
+    <h5 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Interactivity:</h5>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        You can interact with the chart to get more detailed information:
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Hover Over Bars:</strong> Hovering over any bar segment will display a tooltip with the following information:
+            <ul>
+                <li><strong>Subtype:</strong> The subtype associated with the bar.</li>
+                <li><strong>Resistance:</strong> The resistance type represented by that segment.</li>
+                <li><strong>Genes:</strong> The total number of genes contributing to that segment.</li>
+            </ul>
+        </li>
+        <li><strong>Hover Over Center Line Points:</strong> Hovering over any point on the center line will display:
+            <ul>
+                <li><strong>Subtype:</strong> The subtype at that position.</li>
+                <li><strong>Samples:</strong> The number of samples belonging to that subtype.</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h5 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Interpreting the Chart:</h5>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The chart provides a visual summary of resistance gene distribution across subtypes:
+    </p>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>High Bars:</strong> Subtypes with higher bars have a greater average number of resistance genes per sample.</li>
+        <li><strong>Dominant Resistances:</strong> The color segments within the bars indicate which resistance types are most common in each subtype.</li>
+        <li><strong>Sample Distribution:</strong> The center line helps you understand how many samples belong to each subtype, which is important for assessing the representativeness of the data.</li>
+    </ul>
+
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">2. Exploring the Resistance Genes Table</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        Next to the polar chart, there is a table that provides detailed information about the resistance genes identified in each sample.
+    </p>
+
+    <h5 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Table Structure:</h5>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The table is organized hierarchically to facilitate easy navigation and interpretation:
+    </p>
+
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>SUBTYPE:</strong> The highest level of grouping in the table. Subtypes are displayed with bold text and larger font size for emphasis.</li>
+        <li><strong>SAMPLE:</strong> Under each subtype, samples are listed. The sample names are bolded and slightly smaller in font size than the subtypes.</li>
+        <li><strong>RESISTANCE:</strong> For each sample, the resistance types identified are listed in bold text.</li>
+        <li><strong>GENES:</strong> Under each resistance type, the specific genes detected are displayed. Hovering over a gene will show the percentage identity (%IDENTITY) to reference sequences.</li>
+    </ul>
+
+    <h5 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Interactivity:</h5>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The table is interactive:
+    </p>
+
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Hover Over Genes:</strong> Hovering over any gene will display a tooltip with the %IDENTITY, indicating how closely the gene matches known resistance genes.</li>
+    </ul>
+
+    <h5 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">Using the Table:</h5>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The table allows you to:
+    </p>
+
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Identify Resistance Profiles:</strong> See which resistance genes are present in each sample and subtype.</li>
+        <li><strong>Assess Gene Diversity:</strong> Observe the variety of genes contributing to resistance within samples and subtypes.</li>
+        <li><strong>Compare Subtypes and Samples:</strong> Quickly compare resistance profiles across different subtypes and samples.</li>
+    </ul>
+
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">3. Tips for Interpretation</h4>
+    <ul style="font-family: Arial, sans-serif; font-size: 16px;">
+        <li><strong>Correlate Chart and Table:</strong> Use the polar chart to identify subtypes of interest and refer to the table for detailed gene information.</li>
+        <li><strong>Look for Patterns:</strong> Observe if certain resistance types are prevalent in specific subtypes or if there are unique resistance profiles.</li>
+        <li><strong>Sample Representativeness:</strong> Keep in mind the number of samples per subtype when interpreting the average gene counts.</li>
+    </ul>
+
+    <h4 style="font-family: 'Arial Narrow', Arial, sans-serif; font-weight: bold;">4. Additional Information</h4>
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        The polar chart and table are dynamically generated based on your data. The visualization adjusts to highlight the most relevant information for your dataset.
+    </p>
+
+    <p style="font-family: Arial, sans-serif; font-size: 16px;">
+        If you have questions or need further assistance in interpreting these visualizations, please consult the documentation or reach out to a bioinformatics specialist.
+    </p>
+</div>
+"""

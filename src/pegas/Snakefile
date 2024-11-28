@@ -18,13 +18,12 @@ install_path = config.get("install_path", None)
 shovill_cpus = config.get("shovill_cpu_cores", 1)
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
+work_directory = config.get("output_dir", None)
 
 # Ensure the raw_data directory exists
 os.makedirs("raw_data", exist_ok=True)
 
-with open(f"{install_path}/layout.html", 'r') as file:
-    html_string = file.read()
-
+html_path = f"{install_path}"
 # ================= Utility Functions =================
 
 def list_fastq_files(path):
@@ -33,9 +32,7 @@ def list_fastq_files(path):
 
 def get_core_sample_name(filename):
     """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-    pattern = re.compile(r'^(?P<sample>.+?)[_\.\-]?R[12].*\.fastq\.gz$', re.IGNORECASE)
-    match = pattern.match(os.path.basename(filename))
-    return match.group("sample") if match else None
+    return os.path.basename(filename).replace("_R1", "").replace("_R2", "").replace(".fastq.gz", "")
 
 def build_fastq_pairs(fastq_files):
     """Pairs R1 and R2 files based on sample names."""
@@ -91,18 +88,19 @@ rule all:
             "results/{sample}/prokka/{sample}.gff",
             sample=sample_pairs.keys()
         ),
-        pangenome_flag="flags/.pangenome",
-        Box_Contig_Length="report/Contig_Length_Box_Plot.html",
-        DF_Full_Table="report/Gene_Table.html",
-        DF_Reads_Table="report/FastQC_Table.html",
-        Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
-        Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
-        Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
-        Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
-        Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
-        Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
-        Subtype_HTML_String="report/Resistance_Profile.html",
-        Sunburst_Figure="report/MLST_Sunburst_Plot.html",
+        # pangenome_flag="flags/.pangenome",
+        # Box_Contig_Length="report/Contig_Length_Box_Plot.html",
+        # DF_Full_Table="report/Gene_Table.html",
+        # DF_Reads_Table="report/FastQC_Table.html",
+        # Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
+        # Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
+        # Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
+        # Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
+        # Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
+        # Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
+        # Subtype_HTML_String="report/Resistance_Profile.html",
+        # Sunburst_Figure="report/MLST_Sunburst_Plot.html",
+        report="report/report.html",
         flag="flags/.report"
 
 rule fastqc:
@@ -275,17 +273,18 @@ rule build_report:
     input:
         pangenome="flags/.pangenome",
     output:
-        Box_Contig_Length="report/Contig_Length_Box_Plot.html",
-        DF_Full_Table="report/Gene_Table.html",
-        DF_Reads_Table="report/FastQC_Table.html",
-        Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
-        Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
-        Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
-        Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
-        Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
-        Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
-        Subtype_HTML_String="report/Resistance_Profile.html",
-        Sunburst_Figure="report/MLST_Sunburst_Plot.html",
+        # Box_Contig_Length="report/Contig_Length_Box_Plot.html",
+        # DF_Full_Table="report/Gene_Table.html",
+        # DF_Reads_Table="report/FastQC_Table.html",
+        # Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
+        # Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
+        # Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
+        # Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
+        # Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
+        # Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
+        # Subtype_HTML_String="report/Resistance_Profile.html",
+        # Sunburst_Figure="report/MLST_Sunburst_Plot.html",
+        report="report/report.html",
         flag="flags/.report"
     run:
-        build_report(html_string)
+        build_report(html_path, raw_data_path, work_directory)

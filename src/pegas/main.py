@@ -17,12 +17,13 @@ def parse_arguments():
     parser.add_argument("-d", "--data", dest="data", help="Directory containing all the fastq.gz files", required=True)
     parser.add_argument("-o", "--output", dest="output", help="Directory where output files will be saved", required=True)
     parser.add_argument("-c", "--cores", dest="cores", help="The number of cores to use", default=1, type=int)
-    parser.add_argument("--unlock", help="Unlock the working directory", action="store_true")
+    # parser.add_argument("--unlock", help="Unlock the working directory", action="store_true")
     parser.add_argument("--overwrite", help="Overwrite the output directory if it exists", action="store_true")
     parser.add_argument("--rerun-pangenome", help="Rerun the pangenome analysis", action="store_true")
     parser.add_argument("--shovill-cpu-cores", dest="shovill_cpu_cores", help="Number of CPU cores to use for Shovill", type=int)
     parser.add_argument("--prokka-cpu-cores", dest="prokka_cpu_cores", help="Number of CPU cores to use for Prokka", type=int)
     parser.add_argument("--roary-cpu-cores", dest="roary_cpu_cores", help="Number of CPU cores to use for Roary", type=int)
+    parser.add_argument("--redo-report", help="Debug: redo report", action="store_true")
     return parser.parse_args()
 
 # ================= Utility Functions =================
@@ -33,9 +34,7 @@ def list_fastq_files(path):
 
 def get_core_sample_name(filename):
     """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-    pattern = re.compile(r'^(?P<sample>.+?)[_\.\-]?R[12].*\.fastq\.gz$', re.IGNORECASE)
-    match = pattern.match(os.path.basename(filename))
-    return match.group("sample") if match else None
+    return os.path.basename(filename).replace("_R1", "").replace("_R2", "").replace(".fastq.gz", "")
 
 def build_fastq_pairs(fastq_files):
     """Pairs R1 and R2 files based on sample names."""
@@ -111,6 +110,7 @@ def main():
 
     args = parse_arguments()
 
+
     data_dir = args.data
     output_dir = args.output
     cores = args.cores
@@ -127,6 +127,11 @@ def main():
     # Remove files in raw_data that do not exist in raw_data_path
     remove_extra_files(output_dir, "raw_data", raw_data_files)
 
+    if args.redo_report:
+        if os.path.exists(os.path.join(output_dir, "report")):
+            shutil.rmtree(os.path.join(output_dir, "report"))
+        if os.path.exists(os.path.join(output_dir, "flags", ".report")):
+            os.remove(os.path.join(output_dir, "flags", ".report"))
 
     # Check if the output directory exists
     if os.path.exists(output_dir) and not overwrite:
@@ -139,7 +144,8 @@ def main():
     config_params = [
         f"raw_data='{data_dir}'",
         f"outdir='{output_dir}'",
-        f"install_path='{path}'"
+        f"install_path='{path}'",
+        f"output_dir='{output_dir}'"
     ]
 
     if rerun_pangenome:
@@ -165,18 +171,30 @@ def main():
         "--use-conda"
     ]
 
+    unlock_command = [
+        "snakemake",
+        "--snakefile", os.path.join(path, "Snakefile"),
+        "--directory", output_dir,
+        "--cores", str(cores),
+        "--unlock"
+    ]
+
     # Add the --unlock flag if needed
-    if args.unlock:
-        command.append("--unlock")
+    # if args.unlock:
+    #     command.append("--unlock")
 
     # Add the --config option and configuration parameters
     command.append("--config")
     command.extend(config_params)
 
+    unlock_command.append("--config")
+    unlock_command.extend(config_params)
+
     tqdm.write("Running PeGAS pipeline with the following command:")
     tqdm.write(" ".join(command))
 
     # Run the pipeline
+    subprocess.run(unlock_command)
     result = subprocess.run(command)
     if result.returncode != 0:
         tqdm.write("Error: Snakemake pipeline failed.")
