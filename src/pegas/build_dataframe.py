@@ -23,7 +23,7 @@ def build_dataframe():
                 # Read abricate_ncbi.tsv ànd extract the GENE, ACCESSSION and PRODUCT columns
                 if file == "abricate_ncbi.tsv":
                     abricate_ncbi = pd.read_csv(f"results/{sample}/{file}", sep="\t")
-                    abricate_ncbi = abricate_ncbi[["GENE", "ACCESSION", "PRODUCT", "%IDENTITY", "%COVERAGE", "RESISTANCE"]]
+                    abricate_ncbi = abricate_ncbi[["GENE", "ACCESSION", "PRODUCT", "%IDENTITY", "%COVERAGE", "RESISTANCE", "START", "END", "SEQUENCE", "STRAND"]]
 
                     # Add the prediction source column
                     abricate_ncbi["PREDICTION_SOURCE"] = "NCBI"
@@ -31,7 +31,7 @@ def build_dataframe():
                 # Read abricate_vfdb.tsv and extract the GENE, ACCESSSION and PRODUCT columns
                 if file == "abricate_vfdb.tsv":
                     abricate_vfdb = pd.read_csv(f"results/{sample}/{file}", sep="\t")
-                    abricate_vfdb = abricate_vfdb[["GENE", "ACCESSION", "PRODUCT", "%IDENTITY", "%COVERAGE", "RESISTANCE"]]
+                    abricate_vfdb = abricate_vfdb[["GENE", "ACCESSION", "PRODUCT", "%IDENTITY", "%COVERAGE", "RESISTANCE", "START", "END", "SEQUENCE", "STRAND"]]
 
                     # Add the prediction source column
                     abricate_vfdb["PREDICTION_SOURCE"] = "VFDB"
@@ -39,7 +39,7 @@ def build_dataframe():
                 # Read abricate_plasmidfinder.tsv and extract the GENE, ACCESSSION and PRODUCT columns
                 if file == "abricate_plasmidfinder.tsv":
                     abricate_plasmidfinder = pd.read_csv(f"results/{sample}/{file}", sep="\t")
-                    abricate_plasmidfinder = abricate_plasmidfinder[["GENE", "ACCESSION", "PRODUCT", "%IDENTITY", "%COVERAGE", "RESISTANCE"]]
+                    abricate_plasmidfinder = abricate_plasmidfinder[["GENE", "ACCESSION", "PRODUCT", "%IDENTITY", "%COVERAGE", "RESISTANCE", "START", "END", "SEQUENCE", "STRAND"]]
 
                     # Add the prediction source column 
                     abricate_plasmidfinder["PREDICTION_SOURCE"] = "PlasmidFinder"
@@ -49,23 +49,70 @@ def build_dataframe():
                 # The header looks like this:
                 # >contig00001 len=129428 cov=64.2 corr=0 spades=NODE_1_length_129428_cov_64.218227_pilon
                 if os.path.isdir(f"results/{sample}/shovill"):
-                    
+                        
                     # Check for the contigs.fa file
-                    if os.path.isfile(f"results/{sample}/shovill/contigs.fa"):
-                        contigs = open(f"results/{sample}/shovill/contigs.fa", "r")
-                        contigs = contigs.read()
+                    contigs_file = f"results/{sample}/shovill/contigs.fa"
+                    if os.path.isfile(contigs_file):
+                        # Read the contigs.fa file
+                        with open(contigs_file, "r") as f:
+                            contigs_content = f.read()
 
-                        # Get the first line of the file
-                        contig_data = contigs.split("\n")[0]
+                        # Split the contents into individual contigs
+                        contig_entries = contigs_content.strip().split(">")[1:]  # Skip empty string before the first '>'
 
-                        # Get the length of the longest contig len=...
-                        contig_length = int(re.findall(r"len=(\d+)", contig_data)[0])
+                        contig_lengths = []
+                        contig_coverages = []
+                        total_assembly_length = 0
 
-                        # Get the coverage of the longest contig cov=...
-                        contig_coverage = float(re.findall(r"cov=(\d+.\d+)", contig_data)[0])
+                        for contig in contig_entries:
+                            # Split header and sequence
+                            lines = contig.strip().split("\n")
+                            header = lines[0]
+                            sequence = ''.join(lines[1:])  # Join the sequence lines
 
-                        # Number of contigs
-                        contig_number = len(re.findall(r">", contigs))
+                            # Extract length and coverage from header
+                            len_match = re.search(r'len=(\d+)', header)
+                            cov_match = re.search(r'cov=([\d\.]+)', header)
+
+                            if len_match:
+                                length = int(len_match.group(1))
+                                contig_lengths.append(length)
+                                total_assembly_length += length  # Sum up total assembly length
+                            else:
+                                # Skip contigs without length information
+                                continue
+
+                            if cov_match:
+                                coverage = float(cov_match.group(1))
+                                contig_coverages.append(coverage)
+                            else:
+                                contig_coverages.append(0.0)  # Assign zero if coverage not available
+
+                        # Check if we have any contigs
+                        if not contig_lengths:
+                            print(f"No contigs found in sample {sample}.")
+                            # Handle this case appropriately
+                        else:
+                            # Sort contig lengths in descending order
+                            sorted_contig_lengths = sorted(contig_lengths, reverse=True)
+
+                            # Calculate N50
+                            cumulative_length = 0
+                            half_total_length = total_assembly_length / 2
+                            n50_value = None
+
+                            for length in sorted_contig_lengths:
+                                cumulative_length += length
+                                if cumulative_length >= half_total_length:
+                                    n50_value = length
+                                    break  # Found the N50 value
+
+                            # Get the coverage of the contig where N50 is reached
+                            n50_index = contig_lengths.index(n50_value)
+                            n50_coverage = contig_coverages[n50_index]
+
+                            # Number of contigs
+                            contig_number = len(contig_lengths)
                 
                 # Read mlst.tsv and extract thesecond and third columns
                 # mlst.tsv has no header        
@@ -83,8 +130,8 @@ def build_dataframe():
             df["SAMPLE"] = sample
 
             # Add the contig length and coverage columns
-            df["CONTIG_LENGTH"] = contig_length
-            df["CONTIG_COVERAGE"] = contig_coverage
+            df["CONTIG_LENGTH"] = n50_value
+            df["CONTIG_COVERAGE"] = n50_coverage
             df["CONTIG_NUMBER"] = contig_number
 
             # Add the SPECIES and SUBTYPE columns
