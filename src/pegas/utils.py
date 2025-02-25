@@ -240,7 +240,19 @@ gc_content_dict = {
     "Enterococcus faecium": "37.9",
     "Streptococcus suis": "41.8",
     "Streptococcus pneumoniae": "39.7",
-    "Clostridium perfringens": "28.6"
+    "Clostridium perfringens": "28.6",
+    "Bacillus subtilis": "43.8",
+    "Pseudomonas aeruginosa": "66.6",
+    "Staphylococcus aureus": "32.7",
+    "Helicobacter pylori": "39.0",
+    "Streptococcus pneumoniae": "39.5",
+    "Listeria": "37.8",
+    "Salmonella enterica": "52.0",
+    "Vibrio cholerae": "47.25",
+    "Neisseria meningitidis": "51.0",
+    "Bacteroides fragilis": "40.0",
+    "Campylobacter": "30.4",
+    "Lactobacillus rhamnosus": "46.0",
 }
 
 def dilute_hex_color(hex_color, factor):
@@ -563,11 +575,11 @@ def create_figure_json_windrose(widget, title, fig_id):
 # Write a text html description of the sunburst chart that contains the genus and subtype of each of the samples. Describe that and then the fucntionalities of the sunburst chart
 sunburst_help_text_html = """
 <h3>Sample Composition</h3>
-<p>The sunburst chart shows the composition of the collection. Starting from the center, the chart is divided into segments representing the genera present in the samples. Each genus segment is further divided into subsegments representing the subtypes of the genus.
-Hover over each segment to view the genus and subtype of the sample.</p>
+<p>The sunburst chart shows the composition of the collection. Starting from the center, the chart is divided into segments representing the species present in the samples. Each species segment is further divided into subsegments representing the subtypes of the species.
+Hover over each segment to view the species and subtype of the sample.</p>
 <h3>Interactivity</h3>
 <ul>
-    <li>Click on a segment to zoom in and view the subtypes of the selected genus.</li>
+    <li>Click on a segment to zoom in and view the subtypes of the selected species.</li>
     <li>Click on the center of the chart to zoom out and return to the previous view.</li>
 </ul>
 """
@@ -714,7 +726,7 @@ resistome_help_text_html = """
     <ul style="font-family: Arial, sans-serif; font-size: 16px;">
         <li><strong>Bars Represent Resistance Genes:</strong> Each bar corresponds to a subtype and represents the average number of resistance genes per sample for that subtype. The height of the bar indicates the average gene count.</li>
         <li><strong>Ordering of Bars:</strong> The bars are ordered based on the average number of resistance genes per sample, with subtypes having higher averages appearing first.</li>
-        <li><strong>Color-Coded Resistances:</strong> Different resistance types are color-coded for easy identification. This allows you to see which resistances are most prevalent in each subtype.</li>
+        <li><strong>Color-Coded Antibiotics Resistance Classes:</strong> Different resistance types are color-coded for easy identification. This allows you to see which resistances are most prevalent in each subtype.</li>
         <li><strong>Center Line (Circular Line Plot):</strong> The center line that loops around the chart represents the number of samples belonging to each subtype. The position and size of the markers on this line indicate the sample count.</li>
         <li><strong>Subtype Labels:</strong> Each subtype is labeled around the chart, making it easy to identify which bar corresponds to which subtype.</li>
     </ul>
