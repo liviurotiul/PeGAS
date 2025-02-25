@@ -126,7 +126,7 @@ def create_sunburst_chart(df, species_dict, species_color_mapping):
             color="black"                 # Set font color
         )
     )
-    sunburst_figure.update_layout(height=1500)
+    sunburst_figure.update_layout(width=1500)
     sunburst_figure.update_layout(
         hoverlabel_namelength=0,
         title="Sequence typing: sunburst chart"
@@ -302,6 +302,9 @@ def create_annotation_tables(df, species_dict):
 
             # Sort the table by SAMPLE for better readability
             df_table = df_table.sort_values(by=['SAMPLE'])
+
+            if predictor != "NCBI":
+                df_table.drop(columns="RESISTANCE")
 
             # Generate HTML code for the table
             table_html = df_table.to_html(
@@ -536,7 +539,7 @@ def create_subtype_polar_charts(df, species_dict):
 
         resistances = sorted(df_species['RESISTANCE'].unique())
 
-        if len(resistances) == 0:
+        if len(resistances) == 0 or len(subtypes) < 2:
             continue
 
         # Count the number of samples in each subtype
