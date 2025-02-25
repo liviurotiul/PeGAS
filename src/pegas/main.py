@@ -19,11 +19,11 @@ def parse_arguments():
     parser.add_argument("-c", "--cores", dest="cores", help="The number of cores to use", default=1, type=int)
     # parser.add_argument("--unlock", help="Unlock the working directory", action="store_true")
     parser.add_argument("--overwrite", help="Overwrite the output directory if it exists", action="store_true")
-    parser.add_argument("--rerun-pangenome", help="Rerun the pangenome analysis", action="store_true")
+    # parser.add_argument("--rerun-pangenome", help="Rerun the pangenome analysis", action="store_true")
     parser.add_argument("--shovill-cpu-cores", dest="shovill_cpu_cores", help="Number of CPU cores to use for Shovill", type=int)
     parser.add_argument("--prokka-cpu-cores", dest="prokka_cpu_cores", help="Number of CPU cores to use for Prokka", type=int)
     parser.add_argument("--roary-cpu-cores", dest="roary_cpu_cores", help="Number of CPU cores to use for Roary", type=int)
-    parser.add_argument("--redo-report", help="Debug: redo report", action="store_true")
+    # parser.add_argument("--redo-report", help="Debug: redo report", action="store_true")
     return parser.parse_args()
 
 # ================= Utility Functions =================
@@ -121,6 +121,13 @@ def main():
     raw_data_files = list_fastq_files(data_dir)
     # copied_data_files = list_fastq_files(os.path.join(output_dir, "raw_data"))
 
+    # Check if the output directory exists
+    if os.path.exists(output_dir) and not overwrite:
+        tqdm.write("[pegas]Output directory already exists. Use --overwrite to overwrite it or specify a different directory.")
+        sys.exit(1)
+    else:
+        os.makedirs(output_dir, exist_ok=True)
+
     # Copy new or modified files from raw_data_path to raw_data
     copy_files(output_dir, raw_data_files, "raw_data")
 
@@ -132,13 +139,6 @@ def main():
             shutil.rmtree(os.path.join(output_dir, "report"))
         if os.path.exists(os.path.join(output_dir, "flags", ".report")):
             os.remove(os.path.join(output_dir, "flags", ".report"))
-
-    # Check if the output directory exists
-    if os.path.exists(output_dir) and not overwrite:
-        tqdm.write("[pegas]Output directory already exists. Use --overwrite to overwrite it or specify a different directory.")
-        sys.exit(1)
-    else:
-        os.makedirs(output_dir, exist_ok=True)
 
     # Prepare configuration parameters
     config_params = [
