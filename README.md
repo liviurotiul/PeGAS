@@ -105,7 +105,7 @@ If you **don't have conda yet installed** we recommend conda [Miniforge](https:/
 or
 ```
 (base)user@user:~$ conda create -n pegas -c bioconda -c conda-forge
-  
+```
 
 ### 3. Using PeGAS
 
