@@ -115,7 +115,7 @@ def main():
     output_dir = args.output
     cores = args.cores
     overwrite = args.overwrite
-    rerun_pangenome = args.rerun_pangenome
+    # rerun_pangenome = args.rerun_pangenome
 
     # List all FASTQ files in the raw_data_path and raw_data directories
     raw_data_files = list_fastq_files(data_dir)
@@ -134,11 +134,11 @@ def main():
     # Remove files in raw_data that do not exist in raw_data_path
     remove_extra_files(output_dir, "raw_data", raw_data_files)
 
-    if args.redo_report:
-        if os.path.exists(os.path.join(output_dir, "report")):
-            shutil.rmtree(os.path.join(output_dir, "report"))
-        if os.path.exists(os.path.join(output_dir, "flags", ".report")):
-            os.remove(os.path.join(output_dir, "flags", ".report"))
+    # if args.redo_report:
+    #     if os.path.exists(os.path.join(output_dir, "report")):
+    #         shutil.rmtree(os.path.join(output_dir, "report"))
+    #     if os.path.exists(os.path.join(output_dir, "flags", ".report")):
+    #         os.remove(os.path.join(output_dir, "flags", ".report"))
 
     # Prepare configuration parameters
     config_params = [
