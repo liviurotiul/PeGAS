@@ -77,7 +77,7 @@ You should be able to see either miniconda or anaconda.
 
   
 
-If you **don't have conda yet installed** we recommend conda [Miniforge](https://github.com/conda-forge/miniforge?tab=readme-ov-file)
+If you **don't have conda yet installed** we recommend conda [[Miniforge](https://github.com/conda-forge/miniforge?tab=readme-ov-file)](https://conda-forge.org/download/)
 
   
 
