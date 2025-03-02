@@ -148,11 +148,11 @@ def main():
         f"output_dir='{output_dir}'"
     ]
 
-    if rerun_pangenome:
-        if os.path.exists(os.path.join(output_dir, "pangenome")):
-            shutil.rmtree(os.path.join(output_dir, "pangenome"))
-        if os.path.exists(os.path.join(output_dir, "flags", ".pangenome")):
-            os.remove(os.path.join(output_dir, "flags", ".pangenome"))
+    # if rerun_pangenome:
+    #     if os.path.exists(os.path.join(output_dir, "pangenome")):
+    #         shutil.rmtree(os.path.join(output_dir, "pangenome"))
+    #     if os.path.exists(os.path.join(output_dir, "flags", ".pangenome")):
+    #         os.remove(os.path.join(output_dir, "flags", ".pangenome"))
 
     if args.shovill_cpu_cores:
         config_params.append(f"shovill_cpu_cores={args.shovill_cpu_cores}")
