@@ -1,7 +1,5 @@
 name: roary_env
 channels:
-  - defaults
-  - bioconda
   - conda-forge
 dependencies:
   - roary
