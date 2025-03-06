@@ -1309,6 +1309,9 @@ def generate_virulence_factor_bar_chart(df, species_dict):
         # Count the appearance of each virulence factor
         virulence_counts = df_species['GENE'].value_counts()
         
+        if len(virulence_counts) == 0:
+            continue
+
         # Sort the virulence factors by count
         virulence_counts = virulence_counts.sort_values(ascending=False)
         
