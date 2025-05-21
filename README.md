@@ -123,31 +123,25 @@ or
 
 ```bash
 
+usage: pegas [-h] -d DATA -o OUTPUT [-c CORES] [--overwrite] [--shovill-cpu-cores SHOVILL_CPU_CORES] [--prokka-cpu-cores PROKKA_CPU_CORES] [--roary-cpu-cores ROARY_CPU_CORES] [--gc GC]
+
+Run the PeGAS pipeline.
+
 options:
-
--h, --help show this help message and exit
-
---d D, --data D The data directory, with all the fastq.gz files
-
---o O, --output O The output directory
-
---s S, --samples S The path to a text file with the list of samples to be processed, each on a new line
-
---c C, --cores C The number of cores to use
-
---overwrite Overwrite the output directory if  it  exists
-
---shovill-cpu-cores SHOVILL_CPU_CORES
-
-Number of CPU cores to use for shovill
-
---prokka-cpu-cores PROKKA_CPU_CORES
-
-Number of CPU cores to use for prokka
-
---roary-cpu-cores ROARY_CPU_CORES
-
-Number of CPU cores to use for roary
+  -h, --help            show this help message and exit
+  -d DATA, --data DATA  Directory containing all the fastq.gz files
+  -o OUTPUT, --output OUTPUT
+                        Directory where output files will be saved
+  -c CORES, --cores CORES
+                        The number of cores to use
+  --overwrite           Overwrite the output directory if it exists
+  --shovill-cpu-cores SHOVILL_CPU_CORES
+                        Number of CPU cores to use for Shovill
+  --prokka-cpu-cores PROKKA_CPU_CORES
+                        Number of CPU cores to use for Prokka
+  --roary-cpu-cores ROARY_CPU_CORES
+                        Number of CPU cores to use for Roary
+  --gc GC               Provide a custom json file path for GC content limits for each species
 
 ```
 

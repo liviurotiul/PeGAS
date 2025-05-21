@@ -23,7 +23,7 @@ def parse_arguments():
     parser.add_argument("--shovill-cpu-cores", dest="shovill_cpu_cores", help="Number of CPU cores to use for Shovill", type=int)
     parser.add_argument("--prokka-cpu-cores", dest="prokka_cpu_cores", help="Number of CPU cores to use for Prokka", type=int)
     parser.add_argument("--roary-cpu-cores", dest="roary_cpu_cores", help="Number of CPU cores to use for Roary", type=int)
-    # parser.add_argument("--redo-report", help="Debug: redo report", action="store_true")
+    parser.add_argument("--gc", dest="gc", help="Provide a custom json file path for GC content limits for each species", type=str, default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json")
     return parser.parse_args()
 
 # ================= Utility Functions =================
@@ -133,13 +133,7 @@ def main():
 
     # Remove files in raw_data that do not exist in raw_data_path
     remove_extra_files(output_dir, "raw_data", raw_data_files)
-
-    # if args.redo_report:
-    #     if os.path.exists(os.path.join(output_dir, "report")):
-    #         shutil.rmtree(os.path.join(output_dir, "report"))
-    #     if os.path.exists(os.path.join(output_dir, "flags", ".report")):
-    #         os.remove(os.path.join(output_dir, "flags", ".report"))
-
+    
     # Prepare configuration parameters
     config_params = [
         f"raw_data='{data_dir}'",
@@ -148,18 +142,14 @@ def main():
         f"output_dir='{output_dir}'"
     ]
 
-    # if rerun_pangenome:
-    #     if os.path.exists(os.path.join(output_dir, "pangenome")):
-    #         shutil.rmtree(os.path.join(output_dir, "pangenome"))
-    #     if os.path.exists(os.path.join(output_dir, "flags", ".pangenome")):
-    #         os.remove(os.path.join(output_dir, "flags", ".pangenome"))
-
     if args.shovill_cpu_cores:
         config_params.append(f"shovill_cpu_cores={args.shovill_cpu_cores}")
     if args.prokka_cpu_cores:
         config_params.append(f"prokka_cpu_cores={args.prokka_cpu_cores}")
     if args.roary_cpu_cores:
         config_params.append(f"roary_cpu_cores={args.roary_cpu_cores}")
+    if args.gc:
+        config_params.append(f"gc='{args.gc}'")
 
     # Build the Snakemake command
     command = [

@@ -10,6 +10,7 @@ import plotly
 import matplotlib
 import math
 import warnings
+import json
 
 from plotly.subplots import make_subplots
 from itertools import permutations
@@ -30,7 +31,7 @@ import plotly.tools
 import matplotlib
 
 
-def create_sunburst_chart(df, species_dict, species_color_mapping):
+def create_sunburst_chart(df, species_dict, species_color_mapping, output_dir):
     """
     Creates a sunburst chart based on sample, subtype, and species data.
     
@@ -48,12 +49,34 @@ def create_sunburst_chart(df, species_dict, species_color_mapping):
     node_info = []
     colors = []
 
+    # Find all mlst.tsv in the directory
+    mlst_files = []
+    mlst_df = pd.DataFrame()
+    for root, dirs, files in os.walk(output_dir):
+        for file in files:
+            if file == "mlst.tsv":
+                # mlst_files.append(os.path.join(root, file))
+                mlst = pd.read_csv(os.path.join(root, file), sep="\t", header=None)
+
+                # Keep only the second and third columns by number
+                mlst = mlst.iloc[:, 1:3]
+
+                # Name the columns
+                mlst.columns = ["SPECIES", "SUBTYPE"]
+                
+                mlst["SAMPLE"] = os.path.basename(root)
+                
+                mlst_df = pd.concat([mlst_df, mlst], ignore_index=True)
+
+
+    mlst_df["SPECIES_COMMON_NAME"] = mlst_df["SPECIES"].map(species_dict)
+    # import pdb;pdb.set_trace()
     # Grouping and preparing data
     df_samples = df.groupby(["SAMPLE", "SUBTYPE", "SPECIES"]).size().reset_index(name="count")
     df_samples["SPECIES_COMMON_NAME"] = df_samples["SPECIES"].map(species_dict)
     sample_list = df_samples["SAMPLE"].unique().tolist()
 
-    for _, sample in df_samples.iterrows():
+    for _, sample in mlst_df.iterrows():
         # Use SPECIES_COMMON_NAME for species
         subtype_species = f"ST{sample['SUBTYPE']}({sample['SPECIES_COMMON_NAME']})"
         
@@ -73,21 +96,21 @@ def create_sunburst_chart(df, species_dict, species_color_mapping):
             label.append(sample["SPECIES_COMMON_NAME"])
             parent.append("")
             value.append(0)
-
+    
     for par, item in zip(parent, label):
         # Condition for species-level nodes
-        if item in df_samples["SPECIES_COMMON_NAME"].unique():
-            no_of_samples = df_samples[df_samples["SPECIES_COMMON_NAME"] == item].shape[0]
+        if item in mlst_df["SPECIES_COMMON_NAME"].unique():
+            no_of_samples = mlst_df[mlst_df["SPECIES_COMMON_NAME"] == item].shape[0]
             node_info.append(
                 f"Number of isolates: {no_of_samples} <br> {round(no_of_samples / len(sample_list) * 100, 2)}% of total isolates"
             )
             colors.append(species_color_mapping[item])
 
         # Condition for subtype-level nodes
-        elif item.split("(")[0].replace("ST", "") in df_samples["SUBTYPE"].astype(str).tolist():
+        elif item.split("(")[0].replace("ST", "") in mlst_df["SUBTYPE"].astype(str).tolist():
             subtype = item.split("(")[0].replace("ST", "")
             species_common_name = item.split("(")[1].replace(")", "")
-            no_of_samples_species = df_samples[df_samples["SPECIES_COMMON_NAME"] == species_common_name]
+            no_of_samples_species = mlst_df[mlst_df["SPECIES_COMMON_NAME"] == species_common_name]
             no_of_samples_subtype = no_of_samples_species[no_of_samples_species["SUBTYPE"] == subtype].shape[0]
             node_info.append(
                 f"Number of isolates: {no_of_samples_subtype} <br> {round(no_of_samples_subtype / len(sample_list) * 100, 2)}% of total isolates"
@@ -96,7 +119,7 @@ def create_sunburst_chart(df, species_dict, species_color_mapping):
             colors.append(diluted_color)
 
         # Condition for sample-level nodes
-        elif item in df_samples["SAMPLE"].tolist():
+        elif item in mlst_df["SAMPLE"].tolist():
             node_info.append("")
             species_common_name = par.split("(")[1].replace(")", "")
             diluted_color = dilute_hex_color(species_color_mapping[species_common_name], 0.1)
@@ -467,6 +490,18 @@ def create_fastqc_table(df, species_dict, gc_content_dict):
                 return f"{actual_gc}% (expected: {expected_gc}%)"
             df_qc[gc_col] = df_qc.apply(compute_GC_intervals, axis=1)
 
+    samples = df_qc.index.tolist()
+
+    aseembly_qc = []
+    for sample in samples:
+        contigs_file = "results/" + sample + "/shovill/contigs.fa"
+        with open(contigs_file, "r") as f:
+            contigs_content = f.read()
+        if ">" in contigs_content:
+            aseembly_qc.append("Success")
+        else:
+            aseembly_qc.append("Fail")
+    df_qc["Aseembly"] = aseembly_qc
     # Generate HTML table code
     df_reads_table_code = df_qc.to_html(classes='table table-striped', table_id='full_qa_table', index=True)
 
@@ -524,6 +559,8 @@ def create_subtype_polar_charts(df, species_dict):
     resistance_to_color['000'] = 'rgba(255,255,255,0)'  # Transparent color for empty space
 
     for sp in df["SPECIES"].unique().tolist():
+        
+        print("[pegas]Creating polar chart for species:", sp)
 
         # Filter for the specific species and drop rows with NaN in resistance
         df_species = df[df["SPECIES"] == sp].dropna(subset=["RESISTANCE"])
@@ -539,7 +576,12 @@ def create_subtype_polar_charts(df, species_dict):
 
         resistances = sorted(df_species['RESISTANCE'].unique())
 
-        if len(resistances) == 0 or len(subtypes) < 2:
+        # if len(subtypes) < 2:
+        #     print(f"[pegas]Not enough subtypes for species '{sp}'. Skipping.")
+        #     continue
+            
+        if len(resistances) == 0:
+            print(f"[pegas]No resistance data for species '{sp}'. Skipping.")
             continue
 
         # Count the number of samples in each subtype
@@ -1424,7 +1466,7 @@ def generate_virulence_factor_table(df, species_dict):
     return tables
 
 
-def build_report(html_template_path, input_dir, output_dir):
+def build_report(html_template_path, input_dir, output_dir, gc_path):
     """
     Builds the report by generating visualizations and integrating them into the HTML template.
 
@@ -1448,7 +1490,7 @@ def build_report(html_template_path, input_dir, output_dir):
 
     info_table = generate_general_info_table(df, input_dir, output_dir)
 
-    sunburst_chart_fig = create_sunburst_chart(df, species_dict, species_color_mapping)
+    sunburst_chart_fig = create_sunburst_chart(df, species_dict, species_color_mapping, output_dir)
     sunburst_chart = create_figure_json(sunburst_chart_fig, "Sequence typing: sunburst chart", "sunburst_chart")
     sunburst_table = create_figure_with_table_json(
         sunburst_chart_fig,
@@ -1525,6 +1567,11 @@ def build_report(html_template_path, input_dir, output_dir):
         qc_elements.append(contig_line_plot)
         figures.append(contig_line_plot)
 
+    # Read JSON file for gc content
+    gc_content_dict = {}
+    with open(gc_path, 'r') as f:
+        gc_content_dict = json.load(f)
+    
     fastqc_table_html = create_fastqc_table(df, species_dict, gc_content_dict)
 
     virulence_figures = generate_virulence_factor_bar_chart(df, species_dict)

@@ -19,6 +19,7 @@ shovill_cpus = config.get("shovill_cpu_cores", 1)
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
+gc_path = config.get("gc", None)
 
 # Ensure the raw_data directory exists
 os.makedirs("raw_data", exist_ok=True)
@@ -88,18 +89,6 @@ rule all:
             "results/{sample}/prokka/{sample}.gff",
             sample=sample_pairs.keys()
         ),
-        # pangenome_flag="flags/.pangenome",
-        # Box_Contig_Length="report/Contig_Length_Box_Plot.html",
-        # DF_Full_Table="report/Gene_Table.html",
-        # DF_Reads_Table="report/FastQC_Table.html",
-        # Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
-        # Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
-        # Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
-        # Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
-        # Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
-        # Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
-        # Subtype_HTML_String="report/Resistance_Profile.html",
-        # Sunburst_Figure="report/MLST_Sunburst_Plot.html",
         report="report/report.html",
         flag="flags/.report"
 
@@ -132,7 +121,25 @@ rule shovill:
     conda:
         "shovill_env.yml"
     shell:
-        "shovill --trim --outdir results/{wildcards.sample}/shovill --R1 {input.R1} --R2 {input.R2} --force --cpus {threads}"
+        r"""
+        set -euo pipefail
+        if ! shovill --trim \
+                --outdir results/{wildcards.sample}/shovill \
+                --R1 {input.R1} --R2 {input.R2} \
+                --force --cpus {threads} ; then
+            echo -e "\n[ERROR] Shovill failed for sample {wildcards.sample}. Creating empty output files. Check {output.log} for details." >&2
+            mkdir -p results/{wildcards.sample}/shovill
+            # Create empty output files to prevent pipeline failure
+            :> {output.assembly}
+            :> {output.gfa}
+            :> {output.corrections}
+            :> {output.spades}
+            # Ensure log file exists; if Shovill didn't create it, make an empty one
+            if [[ ! -f {output.log} ]]; then
+                :> {output.log}
+            fi
+        fi
+        """
 
 rule abricate_ncbi:
     input:
@@ -193,7 +200,32 @@ rule prokka:
     conda:
         "prokka_env.yml"
     shell:
-        "prokka --centre X --compliant {input.assembly} --outdir results/{wildcards.sample}/prokka/" + f" --force --cpus {prokka_cpus}" + " --prefix {wildcards.sample}"
+        r"""
+        set -euo pipefail
+        if ! prokka --centre X --compliant {input.assembly} \
+            --outdir results/{wildcards.sample}/prokka/ \
+            --force --cpus {prokka_cpus} \
+            --prefix {wildcards.sample}; then
+            echo -e "\n[ERROR] Prokka failed for sample {wildcards.sample}. Creating empty outputs. Check {output.log} for details." >&2
+            mkdir -p results/{wildcards.sample}/prokka
+            # Create empty versions of all outputs
+            :> {output.prokka}
+            :> {output.err}
+            :> {output.faa}
+            :> {output.ffn}
+            :> {output.fna}
+            :> {output.fsa}
+            :> {output.gbk}
+            :> {output.sqn}
+            :> {output.tbl}
+            :> {output.tsv}
+            :> {output.txt}
+            # Preserve existing log or create empty
+            if [[ ! -f {output.log} ]]; then
+                :> {output.log}
+            fi
+        fi
+        """
 
 checkpoint build_dataframe:
     input:
@@ -273,18 +305,7 @@ rule build_report:
     input:
         pangenome="flags/.pangenome",
     output:
-        # Box_Contig_Length="report/Contig_Length_Box_Plot.html",
-        # DF_Full_Table="report/Gene_Table.html",
-        # DF_Reads_Table="report/FastQC_Table.html",
-        # Heatmap_Pangenomic="report/Pangenomic_Heatmap.html",
-        # Heatmap_Plasmids_Full_Figure_Coverage="report/Plasmid_Gene_Heatmap.html",
-        # Heatmap_Resistance_Full_Figure="report/Resistance_Heatmap.html",
-        # Heatmap_Virulence_Full_Figure_Coverage="report/Virulence_Heatmap.html",
-        # Pangenome_Pie_Chart="report/Pangenomic_Pie_Chart.html",
-        # Scatter_Contig_Length="report/Contig_Length_Scatter_Plot.html",
-        # Subtype_HTML_String="report/Resistance_Profile.html",
-        # Sunburst_Figure="report/MLST_Sunburst_Plot.html",
         report="report/report.html",
         flag="flags/.report"
     run:
-        build_report(html_path, raw_data_path, work_directory)
+        build_report(html_path, raw_data_path, work_directory, gc_path)
