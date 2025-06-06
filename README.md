@@ -144,7 +144,7 @@ options:
   --gc GC               Provide a custom json file path for GC content limits for each species
 
 ```
-
+A model for the json file can be found [here](https://github.com/liviurotiul/PeGAS/blob/main/src/pegas/gc_content.json)
 ### 3. Visualising the results
 
 - After the files have been processed and the analysis is completed, you can visualise the results in the path, in the report folder and all the resulting files in the results folder
