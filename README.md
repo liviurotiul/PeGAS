@@ -1,3 +1,4 @@
+
   
   
 
@@ -148,3 +149,5 @@ A model for the json file can be found [here](https://github.com/liviurotiul/PeG
 ### 3. Visualising the results
 
 - After the files have been processed and the analysis is completed, you can visualise the results in the path, in the report folder and all the resulting files in the results folder
+
+### PeGAS works out of the box on linux systems. For Windows and MAC users we recommend using virtualization software like Docker or WSL! 
