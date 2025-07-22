@@ -154,6 +154,5 @@ A model for the json file can be found [here](https://github.com/liviurotiul/PeG
 ### PeGAS works out of the box on linux systems. For Windows and MAC users we recommend using virtualization software like Docker or WSL! 
 
 ### 4. Citation
-`
-Liviu-Iulian Rotaru, Marius Surleac, PeGAS: A Versatile Bioinformatics Pipeline for AMR, Virulence and Pangenome Analysis, Bioinformatics Advances, 2025;, vbaf165, [https://doi.org/10.1093/bioadv/vbaf165](https://doi.org/10.1093/bioadv/vbaf165)
-`
+
+Liviu-Iulian Rotaru, Marius Surleac, PeGAS: A Versatile Bioinformatics Pipeline for AMR, Virulence and Pangenome Analysis, _Bioinformatics Advances_, 2025;, vbaf165, [https://doi.org/10.1093/bioadv/vbaf165](https://doi.org/10.1093/bioadv/vbaf165)
