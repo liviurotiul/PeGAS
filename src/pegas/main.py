@@ -8,23 +8,41 @@ import re
 
 from tqdm import tqdm
 from glob import glob
+import multiprocessing as mp
 
 warnings.filterwarnings("ignore")
+
+CAP = 16
 
 # ================= Argument Parsing =================
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run the PeGAS pipeline.")
-    parser.add_argument("-d", "--data", dest="data", help="Directory containing all the fastq.gz files", required=True)
-    parser.add_argument("-o", "--output", dest="output", help="Directory where output files will be saved", required=True)
-    parser.add_argument("-c", "--cores", dest="cores", help="The number of cores to use", default=1, type=int)
-    # parser.add_argument("--unlock", help="Unlock the working directory", action="store_true")
-    parser.add_argument("--overwrite", help="Overwrite the output directory if it exists", action="store_true")
-    # parser.add_argument("--rerun-pangenome", help="Rerun the pangenome analysis", action="store_true")
-    parser.add_argument("--shovill-cpu-cores", dest="shovill_cpu_cores", help="Number of CPU cores to use for Shovill", type=int)
-    parser.add_argument("--prokka-cpu-cores", dest="prokka_cpu_cores", help="Number of CPU cores to use for Prokka", type=int)
-    parser.add_argument("--roary-cpu-cores", dest="roary_cpu_cores", help="Number of CPU cores to use for Roary", type=int)
-    parser.add_argument("--gc", dest="gc", help="Provide a custom json file path for GC content limits for each species", type=str, default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json")
-    return parser.parse_args()
+    parser.add_argument("-d", "--data", required=True, help="Directory with fastq.gz files")
+    parser.add_argument("-o", "--output", required=True, help="Directory for outputs")
+    parser.add_argument("-c", "--cores", type=int, help="Total cores to use (default: all)")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite output dir if it exists")
+    parser.add_argument("--shovill-cpu-cores", type=int)
+    parser.add_argument("--prokka-cpu-cores", type=int)
+    parser.add_argument("--roary-cpu-cores",  type=int)
+    parser.add_argument("--gc", type=str,
+                        default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json",
+                        help="Custom JSON with GC content limits per species")
+    args = parser.parse_args()
+
+    total = mp.cpu_count()
+    args.cores = args.cores or total
+
+    def default_chunk(n):  # 1/4 of total, capped, at least 1
+        return min(CAP, max(1, n // 4))
+
+    if args.shovill_cpu_cores is None:
+        args.shovill_cpu_cores = default_chunk(args.cores)
+    if args.prokka_cpu_cores is None:
+        args.prokka_cpu_cores = default_chunk(args.cores)
+    if args.roary_cpu_cores is None:
+        args.roary_cpu_cores = args.cores
+
+    return args
 
 # ================= Utility Functions =================
 def list_fastq_files(path):
