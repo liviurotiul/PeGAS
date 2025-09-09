@@ -7,10 +7,10 @@ class CustomInstallCommand(install):
     def run(self):
         install.run(self)
         subprocess.call(['bash', 'install.sh'])
- 
+
 setup(
     name='pegas',
-    version='1.0.8',
+    version='1.0.9',
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,

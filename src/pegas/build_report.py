@@ -67,63 +67,52 @@ def create_sunburst_chart(df, species_dict, species_color_mapping, output_dir):
                 mlst["SAMPLE"] = os.path.basename(root)
                 
                 mlst_df = pd.concat([mlst_df, mlst], ignore_index=True)
-
-
-    mlst_df["SPECIES_COMMON_NAME"] = mlst_df["SPECIES"].map(species_dict)
-    # import pdb;pdb.set_trace()
-    # Grouping and preparing data
-    df_samples = df.groupby(["SAMPLE", "SUBTYPE", "SPECIES"]).size().reset_index(name="count")
-    df_samples["SPECIES_COMMON_NAME"] = df_samples["SPECIES"].map(species_dict)
-    sample_list = df_samples["SAMPLE"].unique().tolist()
-
-    for _, sample in mlst_df.iterrows():
-        # Use SPECIES_COMMON_NAME for species
-        subtype_species = f"ST{sample['SUBTYPE']}({sample['SPECIES_COMMON_NAME']})"
-        
-        # Append the sample label
-        label.append(sample["SAMPLE"])
-        parent.append(subtype_species)
-        value.append(1)
-        
-        # Check if the subtype-species combination has been added as a label
-        if subtype_species not in label:
-            label.append(subtype_species)
-            parent.append(sample["SPECIES_COMMON_NAME"])
-            value.append(0)
-        
-        # Check if the species has been added as a label
-        if sample["SPECIES_COMMON_NAME"] not in label:
-            label.append(sample["SPECIES_COMMON_NAME"])
-            parent.append("")
-            value.append(0)
     
-    for par, item in zip(parent, label):
-        # Condition for species-level nodes
-        if item in mlst_df["SPECIES_COMMON_NAME"].unique():
-            no_of_samples = mlst_df[mlst_df["SPECIES_COMMON_NAME"] == item].shape[0]
-            node_info.append(
-                f"Number of isolates: {no_of_samples} <br> {round(no_of_samples / len(sample_list) * 100, 2)}% of total isolates"
-            )
-            colors.append(species_color_mapping[item])
+    mlst_df["SPECIES_COMMON_NAME"] = mlst_df["SPECIES"].map(species_dict)
 
-        # Condition for subtype-level nodes
-        elif item.split("(")[0].replace("ST", "") in mlst_df["SUBTYPE"].astype(str).tolist():
-            subtype = item.split("(")[0].replace("ST", "")
-            species_common_name = item.split("(")[1].replace(")", "")
-            no_of_samples_species = mlst_df[mlst_df["SPECIES_COMMON_NAME"] == species_common_name]
-            no_of_samples_subtype = no_of_samples_species[no_of_samples_species["SUBTYPE"] == subtype].shape[0]
-            node_info.append(
-                f"Number of isolates: {no_of_samples_subtype} <br> {round(no_of_samples_subtype / len(sample_list) * 100, 2)}% of total isolates"
-            )
-            diluted_color = dilute_hex_color(species_color_mapping[species_common_name], 0.05)
-            colors.append(diluted_color)
+    # Grouping and preparing data
+    sample_list = mlst_df["SAMPLE"].unique().tolist()
 
-        # Condition for sample-level nodes
-        elif item in mlst_df["SAMPLE"].tolist():
+    seen_species, seen_subtype = set(), set()
+    for _, row in mlst_df.iterrows():
+        sp = row["SPECIES_COMMON_NAME"]
+        st = row["SUBTYPE"]
+        smp = row["SAMPLE"]
+        st_label = f"ST{st}({sp})"
+
+        if sp not in seen_species:
+            label.append(sp); parent.append(""); value.append(0); seen_species.add(sp)
+        if st_label not in seen_subtype:
+            label.append(st_label); parent.append(sp); value.append(0); seen_subtype.add(st_label)
+        label.append(smp); parent.append(st_label); value.append(1)
+
+    node_info, colors = [], []
+    sample_list = mlst_df["SAMPLE"].nunique()
+
+    mlst_df["SUBTYPE"] = (
+        mlst_df["SUBTYPE"]
+        .astype(str)
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)  # handles 3.0 -> "3"
+    )
+
+    for par, itm in zip(parent, label):
+        if par == "":  # species node
+            n = (mlst_df["SPECIES_COMMON_NAME"] == itm).sum()
+            node_info.append(f"Number of isolates: {n} <br> {round(n / sample_list * 100, 2)}% of total isolates")
+            colors.append(species_color_mapping.get(itm, "#999999"))
+        elif "(" in par:  # sample node
+            sp = par.split("(", 1)[1].rstrip(")")
             node_info.append("")
-            species_common_name = par.split("(")[1].replace(")", "")
-            diluted_color = dilute_hex_color(species_color_mapping[species_common_name], 0.1)
-            colors.append(diluted_color)
+            colors.append(dilute_hex_color(species_color_mapping.get(sp, "#999999"), 0.1))
+        else:  # subtype node
+            sp = par
+            st = str(itm.split("(", 1)[0].replace("ST", "")).strip()
+            mask = (mlst_df["SPECIES_COMMON_NAME"] == sp) & (mlst_df["SUBTYPE"] == st)
+            n = mask.sum()
+            node_info.append(f"Number of isolates: {n} <br> {round(n / sample_list * 100, 2)}% of total isolates")
+            colors.append(dilute_hex_color(species_color_mapping.get(sp, "#999999"), 0.05))
+
 
     sunburst_data = {
         "label": label,
@@ -156,7 +145,7 @@ def create_sunburst_chart(df, species_dict, species_color_mapping, output_dir):
     )
 
     # Generate HTML code for the sunburst chart (assuming create_html_element is defined)
-    sunburst_html = create_html_element(sunburst_figure, "")
+    # sunburst_html = create_html_element(sunburst_figure, "")
 
     return sunburst_figure
 
@@ -539,7 +528,7 @@ def create_fastqc_table(df, species_dict, gc_content_dict):
             for gc_col in [f"%GC R1", f"%GC R2"]:
                 if gc_col in df_qc.columns:
                     apply_gc_color(td)
-     
+    
     # Convert the modified table back to HTML
     df_reads_table_code = str(soup)
 
@@ -1041,195 +1030,119 @@ def generate_table_html_for_species(sp, df):
     return custom_css + table_html
 
 def create_contig_plot(df, species_dict):
-    """
-    Creates cumulative contig length plots for each species, highlighting N50 segments.
-
-    Parameters:
-    - df (DataFrame): The dataframe containing species and sample information.
-    - species_dict (dict): A dictionary mapping species codes to species names.
-
-    Returns:
-    - species_contig_plots (dict): Dictionary of cumulative contig length plots per species.
-    - n50_contig_length_box_plot (Figure): Box plot of N50 contig lengths for all samples, colored by species.
-    - contig_coverage_box_plot (Figure): Box plot of average contig coverage for all samples, colored by species.
-    """
-    import numpy as np
-
-    # Initialize dictionaries and lists to store plots and data
     species_contig_plots = {}
-    n50_lengths = []
-    average_coverages = []
+    n50_rows, cov_rows = [], []
 
-    species_list = df['SPECIES'].unique()
+    df = df[['SAMPLE','SPECIES']].dropna().astype(str)
+    df = df.drop_duplicates(subset=['SAMPLE'], keep='first')
+    df['SpeciesName'] = df['SPECIES'].map(species_dict).fillna(df['SPECIES'])
 
-    # Use pastel colors from Plotly's qualitative color scales
-    pastel_colors = qualitative.Pastel1 + qualitative.Pastel2
+    pastel = (qualitative.Pastel1 + qualitative.Pastel2)
+    set2 = qualitative.Set2
+    species_order = sorted(df['SpeciesName'].unique())
+    per_species_idx = {sp:0 for sp in species_order}
 
-    for sp in species_list:
-        species_name = species_dict.get(sp, sp)
-        samples = df[df['SPECIES'] == sp]['SAMPLE'].unique()
+    for _, row in df.iterrows():
+        sample = row['SAMPLE']
+        sp_name = row['SpeciesName']
+        contigs_file = f"results/{sample}/shovill/contigs.fa"
+        if not os.path.exists(contigs_file):
+            continue
+        
+        lens, covs = [], []
+        with open(contigs_file, 'r') as f:
+            for line in f:
+                if line.startswith('>'):
+                    parts = line.strip().split()
+                    try:
+                        L = int([x for x in parts if x.startswith('len=')][0].split('=')[1])
+                        C = float([x for x in parts if x.startswith('cov=')][0].split('=')[1])
+                    except Exception:
+                        continue
+                    lens.append(L); covs.append(C)
+        if not lens:
+            continue
 
-        # Initialize a figure for the species
-        fig = go.Figure()
+        pairs = sorted(zip(lens, covs), key=lambda t: t[0], reverse=True)
+        sorted_lens = np.array([p[0] for p in pairs], dtype=int)
+        sorted_covs = np.array([p[1] for p in pairs], dtype=float)
 
-        for idx, sample in enumerate(samples):
-            # Get the shovill/contigs.fa file
-            contigs_file = f"results/{sample}/shovill/contigs.fa"
+        # assumes you have this helper defined elsewhere
+        n50_value, n50_idx = calculate_n50_and_index(sorted_lens)
+        n50_cov = float(sorted_covs[n50_idx])
 
-            # Check if the contigs file exists
-            if not os.path.exists(contigs_file):
-                tqdm.write(f"Contigs file for sample {sample} not found.")
-                continue
+        n50_rows.append({'Sample': sample, 'N50': int(n50_value), 'Species': sp_name})
+        cov_rows.append({'Sample': sample, 'N50_Coverage': n50_cov, 'Species': sp_name})
 
-            # Read and parse the contig headers to extract lengths and coverages
-            contig_lengths = []
-            contig_coverages = []
-            with open(contigs_file, 'r') as f:
-                for line in f:
-                    if line.startswith('>'):
-                        header = line.strip()
-                        # Extract length and coverage
-                        header_fields = header.split()
-                        len_field = [x for x in header_fields if x.startswith('len=')]
-                        cov_field = [x for x in header_fields if x.startswith('cov=')]
-                        if len(len_field) > 0 and len(cov_field) > 0:
-                            contig_length = int(len_field[0].split('=')[1])
-                            contig_coverage = float(cov_field[0].split('=')[1])
-                            contig_lengths.append(contig_length)
-                            contig_coverages.append(contig_coverage)
+        cum = np.insert(np.cumsum(sorted_lens), 0, 0)
+        x = np.arange(cum.size)
+        x_n50 = x[:n50_idx+2]; y_n50 = cum[:n50_idx+2]
+        x_rest = x[n50_idx+1:]; y_rest = cum[n50_idx+1:]
 
-            # Check if we have contig data
-            if not contig_lengths:
-                tqdm.write(f"No contig data found for sample {sample}.")
-                continue
-
-            # Sort the contig lengths in descending order
-            sorted_contig_lengths = sorted(contig_lengths, reverse=True)
-
-            # Calculate cumulative contig lengths
-            cumulative_lengths = np.cumsum(sorted_contig_lengths)
-            cumulative_lengths = np.insert(cumulative_lengths, 0, 0)
-
-            # Prepare x-values (contig indices), starting from zero
-            x_values = list(range(len(cumulative_lengths)))
-
-            # Calculate N50 and find the index where N50 is reached
-            n50_value, n50_index = calculate_n50_and_index(sorted_contig_lengths)
-
-            n50_lengths.append({
-                'Sample': sample,
-                'N50': n50_value,
-                'Species': species_name
-            })
-
-            # Calculate average coverage
-            n50_coverage = contig_coverages[n50_index]
-            average_coverages.append({
-                'Sample': sample,
-                'N50_Coverage': n50_coverage,
-                'Species': species_name
-            })
-
-            # Adjust indices when splitting data at N50 index
-            x_n50 = x_values[:n50_index + 2]
-            y_n50 = cumulative_lengths[:n50_index + 2]
-            x_rest = x_values[n50_index + 1:]
-            y_rest = cumulative_lengths[n50_index + 1:]
-
-            # Use pastel color for the sample line
-            color_idx = idx % len(pastel_colors)
-            sample_color = pastel_colors[color_idx]
-
-            # Plot segment up to N50 in red
-            fig.add_trace(go.Scatter(
-                x=x_n50,
-                y=y_n50,
-                mode='lines',
-                name=f'{sample} (up to N50)',
-                line=dict(color='red', width=3),
-                hovertemplate=f'Sample: {sample}<br>Contig Index: %{{x}}<br>Cumulative Length: %{{y}} bp<extra></extra>'
+        fig = species_contig_plots.setdefault(
+            sp_name,
+            go.Figure(layout=dict(
+                title=f'Cumulative Contig Lengths for Species {sp_name}',
+                xaxis_title='Contig Index',
+                yaxis_title='Cumulative Contig Length (bp)',
+                legend_title='Samples',
+                template='plotly_white',
+                height=600,
+                xaxis=dict(range=[0, None]),
+                yaxis=dict(range=[0, None])
             ))
-
-            # Plot the rest of the line in pastel color
-            fig.add_trace(go.Scatter(
-                x=x_rest,
-                y=y_rest,
-                mode='lines',
-                name=f'{sample}',
-                line=dict(color=sample_color, width=3),
-                hovertemplate=f'Sample: {sample}<br>Contig Index: %{{x}}<br>Cumulative Length: %{{y}} bp<extra></extra>'
-            ))
-
-        # Update figure layout
-        fig.update_layout(
-            title=f'Cumulative Contig Lengths for Species {species_name}',
-            xaxis_title='Contig Index',
-            yaxis_title='Cumulative Contig Length (bp)',
-            legend_title='Samples',
-            template='plotly_white',
-            height=600,
-            xaxis=dict(range=[0, None]),  # Ensure x-axis starts from 0
-            yaxis=dict(range=[0, None])   # Ensure y-axis starts from 0
         )
+        ci = per_species_idx[sp_name] % len(pastel)
+        color = pastel[ci]; per_species_idx[sp_name] += 1
 
-        # Store the figure in the dictionary
-        species_contig_plots[species_name] = fig
+        fig.add_trace(go.Scatter(
+            x=x_n50, y=y_n50, mode='lines',
+            name=f'{sample} (to N50)',
+            line=dict(color='red', width=3),
+            hovertemplate='Sample: '+sample+'<br>Contig Index: %{x}<br>Cumulative Length: %{y} bp<extra></extra>'
+        ))
+        fig.add_trace(go.Scatter(
+            x=x_rest, y=y_rest, mode='lines',
+            name=sample,
+            line=dict(color=color, width=3),
+            hovertemplate='Sample: '+sample+'<br>Contig Index: %{x}<br>Cumulative Length: %{y} bp<extra></extra>'
+        ))
 
+    n50_df = pd.DataFrame(n50_rows)
+    coverage_df = pd.DataFrame(cov_rows)
 
-    # Create DataFrames for N50 values and average coverages
-    n50_df = pd.DataFrame(n50_lengths)
-    coverage_df = pd.DataFrame(average_coverages)
+    # Guard against empties
+    if n50_df.empty:
+        n50_box_fig = go.Figure()
+        coverage_box_fig = go.Figure()
+        return species_contig_plots, n50_box_fig, coverage_box_fig
 
-    # Use Set3 color palette for box plots
-    colors = qualitative.Set2
+    n50_df['Species'] = pd.Categorical(n50_df['Species'], categories=species_order, ordered=True)
+    coverage_df['Species'] = pd.Categorical(coverage_df['Species'], categories=species_order, ordered=True)
 
-    # Create box plot with N50 contig length for all samples, colored by species
     n50_box_fig = px.box(
-        n50_df,
-        x='Species',
-        y='N50',
-        color='Species',
-        points='all',
-        title='N50 Contig Length Distribution Across Species',
-        template='plotly_white',
-        color_discrete_sequence=colors
+        n50_df, x='Species', y='N50', color='Species',
+        points='all', title='N50 Contig Length Distribution Across Species',
+        template='plotly_white', color_discrete_sequence=set2,
+        custom_data=['Sample']
     )
     n50_box_fig.update_traces(
-        jitter=0.3,
-        pointpos=-1.8,
-        marker_size=6,
-        hovertemplate='Sample: %{customdata[0]}<br>Species: %{x}<br>N50: %{y} bp<extra></extra>',
-        customdata=n50_df[['Sample']]
+        jitter=0.3, pointpos=-1.8, marker_size=6,
+        hovertemplate='Sample: %{customdata[0]}<br>Species: %{x}<br>N50: %{y} bp<extra></extra>'
     )
-    n50_box_fig.update_layout(
-        yaxis_title='N50 Contig Length (bp)',
-        xaxis_title='Species',
-        height=400  # Adjusted height
-    )
+    n50_box_fig.update_layout(yaxis_title='N50 Contig Length (bp)', xaxis_title='Species', height=400)
 
-    # Create box plot with average contig coverage for all samples, colored by species
     coverage_box_fig = px.box(
-        coverage_df,
-        x='Species',
-        y='N50_Coverage',
-        color='Species',
-        points='all',
-        title='N50 Contig Coverage Across Species',
-        template='plotly_white',
-        color_discrete_sequence=colors
+        coverage_df, x='Species', y='N50_Coverage', color='Species',
+        points='all', title='N50 Contig Coverage Across Species',
+        template='plotly_white', color_discrete_sequence=set2,
+        custom_data=['Sample']
     )
     coverage_box_fig.update_traces(
-        jitter=0.3,
-        pointpos=-1.8,
-        marker_size=6,
-        hovertemplate='Sample: %{customdata[0]}<br>Species: %{x}<br>Coverage: %{y:.2f}X<extra></extra>',
-        customdata=coverage_df[['Sample']]
+        jitter=0.3, pointpos=-1.8, marker_size=6,
+        hovertemplate='Sample: %{customdata[0]}<br>Species: %{x}<br>Coverage: %{y:.2f}X<extra></extra>'
     )
-    coverage_box_fig.update_layout(
-        yaxis_title='N50 Contig Coverage (X)',
-        xaxis_title='Species',
-        height=400  # Adjusted height
-    )
+    coverage_box_fig.update_layout(yaxis_title='N50 Contig Coverage (X)', xaxis_title='Species', height=400)
 
     return species_contig_plots, n50_box_fig, coverage_box_fig
 
@@ -1290,8 +1203,8 @@ def generate_general_info_table(df, input_dir, output_dir):
     # Calculate the required values
     report_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     num_samples = len(df['SAMPLE'].unique())
-    num_genes = len(df['GENE'].unique())
-
+    num_genes = len(df['GENE'])
+    
     # Build the table data
     table_data = [
         ['Date', report_date],
