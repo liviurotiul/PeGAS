@@ -155,4 +155,4 @@ A model for the json file can be found [here](https://github.com/liviurotiul/PeG
 
 ### 4. Citation
 
-Liviu-Iulian Rotaru, Marius Surleac, PeGAS: A Versatile Bioinformatics Pipeline for AMR, Virulence and Pangenome Analysis, _Bioinformatics Advances_, 2025;, vbaf165, [https://doi.org/10.1093/bioadv/vbaf165](https://doi.org/10.1093/bioadv/vbaf165)
+Liviu-Iulian Rotaru, Marius Surleac, PeGAS: a versatile bioinformatics pipeline for antimicrobial resistance, virulence and pangenome analysis, Bioinformatics Advances, Volume 5, Issue 1, 2025, vbaf165, https://doi.org/10.1093/bioadv/vbaf165
