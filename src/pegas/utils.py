@@ -1,4 +1,4 @@
-# Here you can find different useful functions for handling files and database operations
+# Utility functions for handling files and database operations.
 import os
 import fnmatch
 import shutil
@@ -11,23 +11,23 @@ from subprocess import call
 from typing import List, Dict, Tuple
 
 def generate_color():
-    # Generate a random hue value between 0 and 360 (in degrees)
+    # Generate a random hue value between 0 and 360 (in degrees).
     h = random.randint(0, 359)
-    # Set saturation and lightness values for a pastel effect
-    s = 55  # Lower saturation for pastel effect
-    l = 70  # Higher lightness for pastel effect
-    # Convert HSL to RGB and format as a hexadecimal color code
+    # Set saturation and lightness values for a pastel effect.
+    s = 55  # Lower saturation for pastel effect.
+    l = 70  # Higher lightness for pastel effect.
+    # Convert HSL to RGB and format as a hexadecimal color code.
     r, g, b = hsl_to_rgb(h, s, l)
     return "#{:02x}{:02x}{:02x}".format(r, g, b)
 
 
 def hsl_to_rgb(h, s, l):
-    # Convert HSL values to floating-point numbers between 0 and 1
+    # Convert HSL values to floating-point numbers between 0 and 1.
     h = h / 360
     s = s / 100
     l = l / 100
 
-    # Calculate intermediate values
+    # Calculate intermediate values.
     if s == 0:
         r = g = b = l
     else:
@@ -37,7 +37,7 @@ def hsl_to_rgb(h, s, l):
         g = hue_to_rgb(p, q, h)
         b = hue_to_rgb(p, q, h - 1/3)
 
-    # Convert RGB values to integers between 0 and 255
+    # Convert RGB values to integers between 0 and 255.
     r = round(r * 255)
     g = round(g * 255)
     b = round(b * 255)
@@ -224,30 +224,30 @@ species_dict = {
 }
 
 def dilute_hex_color(hex_color, factor):
-    # Convert hex color string to RGB tuple
+    # Convert hex color string to RGB tuple.
     hex_color = hex_color.lstrip('#')
     rgb_color = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-    # Apply lightening factor to each RGB component
+    # Apply lightening factor to each RGB component.
     r = min(int(rgb_color[0] + 255 * factor), 255)
     g = min(int(rgb_color[1] + 255 * factor), 255)
     b = min(int(rgb_color[2] + 255 * factor), 255)
 
-    # Convert RGB tuple to hex color string
+    # Convert RGB tuple to hex color string.
     return '#{:02x}{:02x}{:02x}'.format(r, g, b)
 
 
 def find_file(filename, search_path):
     """Recursively searches for a file in a given directory and its subdirectories."""
 
-    # Iterate through all items in the search path
+    # Iterate through all items in the search path.
     for root, dirnames, filenames in os.walk(search_path):
 
-        # Check if the file exists in the current directory
+        # Check if the file exists in the current directory.
         if filename in filenames:
             return os.path.join(root, filename)
 
-    # If the file was not found in any of the directories, return None
+    # If the file was not found in any of the directories, return None.
     return None
 
 
@@ -336,6 +336,7 @@ def connection_graph_string_format(hover_str, df, accession_product):
 
     return ret_str
 
+
 def find_html_files(path):
     html_files = []
     for root, dirs, files in os.walk(path):
@@ -344,21 +345,6 @@ def find_html_files(path):
                 html_files.append(os.path.join(root, file))
     return html_files
 
-
-# def create_html_element(widget, title, width="8", min_height="300px"):
-
-#     # If /report doesn't exist, create it
-#     if not os.path.exists("report"):
-#         os.system("mkdir report")
-
-#     # If /report/figures/ doesn't exist, create it
-#     if not os.path.exists("report/figures"):
-#         os.system("mkdir report/figures")
-
-#     widget.write_html(f"report/figures/{title}.html", full_html=False, include_plotlyjs='cdn')
-#     f = open(f"report/figures/{title}.html")
-#     code = create_html_widget(f.read(), title, width, min_height)
-#     return code
 
 def create_html_element(widget, title):
     """
@@ -371,10 +357,10 @@ def create_html_element(widget, title):
     Returns:
     - html_with_title (str): The HTML string containing the figure and optional title.
     """
-    # Update the figure layout
+    # Update the figure layout.
     widget.update_layout(
         autosize=True,
-        height=600,  # Adjust height as needed
+        height=600,  # Adjust height as needed.
         margin=dict(l=50, r=50, t=50, b=50),
         title={
             'text': title,
@@ -382,10 +368,10 @@ def create_html_element(widget, title):
             'xanchor': 'center',
             'font': {'size': 20}
         },
-        # You can include other layout settings as needed
+        # You can include other layout settings as needed.
     )
 
-    # Convert the Plotly figure to an HTML string
+    # Convert the Plotly figure to an HTML string.
     html_str = pio.to_html(
         widget,
         full_html=False,
@@ -393,7 +379,7 @@ def create_html_element(widget, title):
         config={'responsive': True}
     )
 
-    # Wrap the HTML with a container if needed
+    # Wrap the HTML with a container if needed.
     html_with_title = f"""
     <div class="figure-container">
         {html_str}
@@ -414,25 +400,25 @@ def create_figure_with_table_json(widget, table_html, title, fig_id):
     Returns:
     - dict: A dictionary containing the figure data, table HTML, and metadata.
     """
-    # Ensure the figure has a unique ID
+    # Ensure the figure has a unique ID.
     if not fig_id:
         raise ValueError("fig_id is required to uniquely identify the figure.")
 
-    # Update the figure layout if needed
+    # Update the figure layout if needed.
     widget.update_layout(
         autosize=False,
         margin=dict(l=50, r=50, t=50, b=50)
     )
 
-    # Serialize the figure to JSON
+    # Serialize the figure to JSON.
     fig_json = widget.to_json()
 
-    # Return a dictionary with the figure data and table HTML
+    # Return a dictionary with the figure data and table HTML.
     return {
         'fig_id': fig_id,
         'fig_json': fig_json,
         'title': title,
-        'table_html': table_html  # Add the table HTML to the dictionary
+        'table_html': table_html  # Add the table HTML to the dictionary.
     }
 
 
@@ -466,14 +452,14 @@ def fix_colorbar(figure, facet, dtick=None):
 def find_file(filename, search_path):
     """Recursively searches for a file in a given directory and its subdirectories."""
 
-    # Iterate through all items in the search path
+    # Iterate through all items in the search path.
     for root, dirnames, filenames in os.walk(search_path):
 
-        # Check if the file exists in the current directory
+        # Check if the file exists in the current directory.
         if filename in filenames:
             return os.path.join(root, filename)
 
-    # If the file was not found in any of the directories, return None
+    # If the file was not found in any of the directories, return None.
     return None
 
 def create_figure_json(widget, title, fig_id):
@@ -488,20 +474,20 @@ def create_figure_json(widget, title, fig_id):
     Returns:
     - dict: A dictionary containing the figure data and metadata.
     """
-    # Ensure the figure has a unique ID
+    # Ensure the figure has a unique ID.
     if not fig_id:
         raise ValueError("fig_id is required to uniquely identify the figure.")
 
-    # Update the figure layout if needed
+    # Update the figure layout if needed.
     widget.update_layout(
         autosize=True,
         margin=dict(l=50, r=50, t=50, b=50)
     )
 
-    # Serialize the figure to JSON
+    # Serialize the figure to JSON.
     fig_json = widget.to_json()
 
-    # Return a dictionary with the figure data
+    # Return a dictionary with the figure data.
     return {
         'fig_id': fig_id,
         'fig_json': fig_json,
@@ -520,27 +506,27 @@ def create_figure_json_windrose(widget, title, fig_id):
     Returns:
     - dict: A dictionary containing the figure data and metadata.
     """
-    # Ensure the figure has a unique ID
+    # Ensure the figure has a unique ID.
     if not fig_id:
         raise ValueError("fig_id is required to uniquely identify the figure.")
 
-    # Update the figure layout if needed
+    # Update the figure layout if needed.
     widget.update_layout(
         autosize=True,
         margin=dict(l=50, r=50, t=50, b=50)
     )
 
-    # Serialize the figure to JSON
+    # Serialize the figure to JSON.
     fig_json = widget.to_json()
 
-    # Return a dictionary with the figure data
+    # Return a dictionary with the figure data.
     return {
         'fig_id': fig_id,
         'fig_json': fig_json,
         'title': title
     }
 
-# Write a text html description of the sunburst chart that contains the genus and subtype of each of the samples. Describe that and then the fucntionalities of the sunburst chart
+# Write a text HTML description of the sunburst chart that contains the genus and subtype of each sample. Describe that and then the functionalities of the sunburst chart.
 sunburst_help_text_html = """
 <h3>Sample Composition</h3>
 <p>The sunburst chart shows the composition of the collection. Starting from the center, the chart is divided into segments representing the species present in the samples. Each species segment is further divided into subsegments representing the subtypes of the species.

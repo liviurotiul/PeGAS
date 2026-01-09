@@ -3,31 +3,36 @@ import subprocess
 import pandas as pd
 from tqdm import tqdm
 
+try:
+    roary_threads = int(getattr(snakemake, "threads", 0) or snakemake.config.get("roary_cpu_cores", 32))
+except Exception:
+    roary_threads = 32
+
 tqdm.write("[pegas]Running pangenome analysis")
 
-# Create pangenome directory if it does not exist
+# Create the pangenome directory if it does not exist.
 os.makedirs('pangenome', exist_ok=True)
 
-# Read eligible species from dataframe
+# Read eligible species from the results DataFrame.
 df = pd.read_csv('dataframe/results.csv', dtype={'SAMPLE': str})
 df_grouped = df.groupby('SPECIES')['SAMPLE'].nunique().reset_index()
 eligible_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
 
 tqdm.write(f"[pegas]Eligible species: {eligible_species}")
 
-# Iterate over each species and process
+# Iterate over each species and process.
 for species in eligible_species:
     tqdm.write(f"[pegas]Processing species: {species}")
 
     species_dir = os.path.join('pangenome', species)
     os.makedirs(species_dir, exist_ok=True)
 
-    # Remove any existing output folder for species
+    # Remove any existing output folder for species.
     output_dir = os.path.join(species_dir, 'output')
     if os.path.exists(output_dir):
         subprocess.run(['rm', '-rf', output_dir])
 
-    # Get associated samples for the species and copy GFF files
+    # Get associated samples for the species and copy GFF files.
     samples = df.loc[df['SPECIES'] == species, 'SAMPLE'].unique().tolist()
     tqdm.write(f"[pegas]Samples for species {species}: {samples}")
 
@@ -36,11 +41,23 @@ for species in eligible_species:
         src_gff = f"results/{sample}/prokka/{sample}.gff"
         dest_gff = os.path.join(species_dir, f"{sample}.gff")
 
-        if not os.path.isfile(dest_gff):
-            tqdm.write(f"[pegas]Copying {sample}.gff to pangenome/{species}")
-            subprocess.run(['cp', src_gff, dest_gff])
+        if os.path.isdir(dest_gff):
+            tqdm.write(f"[pegas]Skipping {dest_gff}: expected a file, found a directory.")
+            continue
 
-    # Run roary for the species
+        if os.path.exists(dest_gff):
+            if os.path.realpath(dest_gff) == os.path.realpath(src_gff):
+                continue
+            if os.path.islink(dest_gff):
+                os.unlink(dest_gff)
+            else:
+                os.remove(dest_gff)
+
+        src_rel = os.path.relpath(src_gff, species_dir)
+        tqdm.write(f"[pegas]Linking {sample}.gff to pangenome/{species}")
+        os.symlink(src_rel, dest_gff)
+
+    # Run roary for the species.
     tqdm.write(f"[pegas]Running roary for species {species}")
     gff_files = [os.path.join(species_dir, f) for f in os.listdir(species_dir) if f.endswith('.gff')]
 
@@ -50,12 +67,12 @@ for species in eligible_species:
             '-f', output_dir,
             '-e',
             '-n',
-            '-p', '32'
+            '-p', str(roary_threads)
         ] + gff_files
 
         subprocess.run(roary_cmd)
 
-        # Check if the output directory needs to be renamed
+        # Check if the output directory needs to be renamed.
         for item in os.listdir(species_dir):
             if item.startswith('output_') and os.path.isdir(os.path.join(species_dir, item)):
                 old_output = os.path.join(species_dir, item)
@@ -64,11 +81,4 @@ for species in eligible_species:
     else:
         tqdm.write(f"[pegas]Not enough samples for species {species} to run roary.")
 
-tqdm.write("[pegas]Pangenome analysis finished, planting flag")
-
-# Create the flag file
-if not os.path.exists('flags'):
-    os.makedirs('flags')
-
-with open('flags/.pangenome', 'w') as f:
-    f.write('')
+tqdm.write("[pegas]Pangenome analysis finished.")

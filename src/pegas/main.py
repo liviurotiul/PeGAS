@@ -5,6 +5,7 @@ import sys
 import shutil
 import warnings
 import re
+import json
 
 from tqdm import tqdm
 from glob import glob
@@ -13,9 +14,16 @@ import multiprocessing as mp
 warnings.filterwarnings("ignore")
 
 CAP = 16
+READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
+CONFIG_FILENAME = "pegas_config.json"
 
-# ================= Argument Parsing =================
-def parse_arguments():
+try:
+    from .gui import launch_gui
+except ImportError:
+    from gui import launch_gui
+
+# ---- Argument parsing ----.
+def build_parser():
     parser = argparse.ArgumentParser(description="Run the PeGAS pipeline.")
     parser.add_argument("-d", "--data", required=True, help="Directory with fastq.gz files")
     parser.add_argument("-o", "--output", required=True, help="Directory for outputs")
@@ -27,12 +35,14 @@ def parse_arguments():
     parser.add_argument("--gc", type=str,
                         default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json",
                         help="Custom JSON with GC content limits per species")
-    args = parser.parse_args()
+    return parser
 
+def finalize_arguments(args):
     total = mp.cpu_count()
     args.cores = args.cores or total
 
-    def default_chunk(n):  # 1/4 of total, capped, at least 1
+    # Use one-quarter of total cores, capped, at least one.
+    def default_chunk(n):
         return min(CAP, max(1, n // 4))
 
     if args.shovill_cpu_cores is None:
@@ -44,39 +54,98 @@ def parse_arguments():
 
     return args
 
-# ================= Utility Functions =================
+def parse_arguments(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    return finalize_arguments(args)
+
+# ---- Utility functions ----.
 def list_fastq_files(path):
-    """Returns a list of all .fastq.gz files in the specified path relative to base_folder."""
-    full_path = os.path.join(path)
+    """Returns a list of all .fastq.gz files in the specified path."""
+    full_path = os.path.abspath(os.path.expanduser(path))
     return [f for f in glob(os.path.join(full_path, "*.fastq.gz"))]
+
+def parse_fastq_read(filename):
+    base = os.path.basename(filename)
+    if not base.endswith(".fastq.gz"):
+        return None
+    stem = base[:-9]
+    matches = list(READ_TOKEN_RE.finditer(stem))
+    if not matches:
+        return None
+    match = matches[-1]
+    sample = stem[:match.start()].rstrip("._-")
+    if not sample:
+        return None
+    return sample, f"R{match.group(1)}"
 
 def get_core_sample_name(filename):
     """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-    return os.path.basename(filename).replace("_R1", "").replace("_R2", "").replace(".fastq.gz", "")
+    parsed = parse_fastq_read(filename)
+    if parsed:
+        return parsed[0]
+    base = os.path.basename(filename)
+    if base.endswith(".fastq.gz"):
+        return base[:-9]
+    return os.path.splitext(base)[0]
 
 def build_fastq_pairs(fastq_files):
     """Pairs R1 and R2 files based on sample names."""
     pairs = {}
+    unmatched = []
     for file in fastq_files:
-        sample = get_core_sample_name(file)
-        if sample:
-            if sample not in pairs:
-                pairs[sample] = {}
-            if "_R1" in file or "R1" in file:
-                pairs[sample]["R1"] = file
-            elif "_R2" in file or "R2" in file:
-                pairs[sample]["R2"] = file
+        parsed = parse_fastq_read(file)
+        if not parsed:
+            unmatched.append(file)
+            continue
+        sample, read = parsed
+        if sample not in pairs:
+            pairs[sample] = {}
+        pairs[sample][read] = file
+
+    orphan_samples = sorted([
+        sample for sample, reads in pairs.items()
+        if "R1" not in reads or "R2" not in reads
+    ])
+    if unmatched:
+        preview = ", ".join(os.path.basename(f) for f in unmatched[:5])
+        more = f" (+{len(unmatched) - 5} more)" if len(unmatched) > 5 else ""
+        tqdm.write(f"[pegas] Warning: {len(unmatched)} FASTQ files did not match the R1/R2 pattern: {preview}{more}")
+    if orphan_samples:
+        preview = ", ".join(orphan_samples[:5])
+        more = f" (+{len(orphan_samples) - 5} more)" if len(orphan_samples) > 5 else ""
+        tqdm.write(f"[pegas] Warning: {len(orphan_samples)} samples missing R1 or R2: {preview}{more}")
+
     return {s: p for s, p in pairs.items() if "R1" in p and "R2" in p}
 
-def copy_files(base_folder, source_files, destination="raw_data"):
-    """Copies files from source directory to destination within base_folder without renaming them."""
-    dest_path = os.path.join(base_folder, destination)
-    os.makedirs(dest_path, exist_ok=True)
-    for src in tqdm(source_files, desc="Copying files"):
-        dest = os.path.join(dest_path, os.path.basename(src))
-        if not os.path.exists(dest) or os.path.getsize(src) != os.path.getsize(dest):
-            shutil.copy2(src, dest)
-            tqdm.write(f"[pegas] Copied '{src}' to '{dest}'.")
+def write_sample_manifest(base_folder, fastq_files, sample_pairs):
+    """Writes a JSON manifest so Snakemake can avoid re-scanning inputs."""
+    manifest_path = os.path.join(base_folder, "sample_manifest.json")
+    manifest = {
+        "fastq_files": fastq_files,
+        "sample_pairs": sample_pairs
+    }
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f)
+    return manifest_path
+
+def write_run_config(output_dir, data_dir, args):
+    """Writes the run configuration to a JSON file in the output directory."""
+    config_path = os.path.join(output_dir, CONFIG_FILENAME)
+    config = {
+        "data": data_dir,
+        "output": output_dir,
+        "cores": args.cores,
+        "overwrite": bool(args.overwrite),
+        "shovill_cpu_cores": args.shovill_cpu_cores,
+        "prokka_cpu_cores": args.prokka_cpu_cores,
+        "roary_cpu_cores": args.roary_cpu_cores,
+        "gc": os.path.abspath(os.path.expanduser(args.gc)) if args.gc else ""
+    }
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    return config_path
 
 def remove_extra_files(base_folder, destination, valid_files):
     """Removes unwanted files from the destination directory and clears related data for affected samples."""
@@ -84,13 +153,13 @@ def remove_extra_files(base_folder, destination, valid_files):
     valid_basenames = {os.path.basename(f) for f in valid_files}
     valid_samples = list(set([get_core_sample_name(f) for f in valid_files]))
 
-    # Remove extra files in the destination directory
+    # Remove extra files in the destination directory.
     for file in glob(os.path.join(dest_path, "*")):
         if os.path.basename(file) not in valid_basenames:
             os.remove(file)
             tqdm.write(f"[pegas] Removed '{file}'.")
 
-    # Remove extra sample directories in the results folder
+    # Remove extra sample directories in the results folder.
     results_path = os.path.join(base_folder, "results")
     if os.path.exists(results_path):
         for folder in os.listdir(results_path):
@@ -98,7 +167,7 @@ def remove_extra_files(base_folder, destination, valid_files):
                 shutil.rmtree(os.path.join(results_path, folder))
                 tqdm.write(f"[pegas] Removed 'results/{folder}' directory.")
 
-    # Remove outdated files in fastqc directory
+    # Remove outdated files in the fastqc directory.
     fastqc_path = os.path.join(base_folder, "fastqc")
     if os.path.exists(fastqc_path):
         valid_file_names = [os.path.basename(file).replace(".fastq.gz", "") for file in valid_files]
@@ -107,7 +176,7 @@ def remove_extra_files(base_folder, destination, valid_files):
                 os.remove(os.path.join(fastqc_path, file))
                 tqdm.write(f"[pegas] Removed '{file}'.")
 
-    # Clear obsolete files in pangenome directory
+    # Clear obsolete files in the pangenome directory.
     pangenome_path = os.path.join(base_folder, "pangenome")
     if os.path.exists(pangenome_path):
         for folder in os.listdir(pangenome_path):
@@ -117,7 +186,7 @@ def remove_extra_files(base_folder, destination, valid_files):
                     tqdm.write(f"[pegas] Removed '{file}' in pangenome.")
                     shutil.rmtree(os.path.join(pangenome_path, folder), ignore_errors=True)
                     
-                    # Remove the pangenome flag if needed
+                    # Remove the pangenome flag if needed.
                     pangenome_flag_path = os.path.join(base_folder, "flags", ".pangenome")
                     if os.path.exists(pangenome_flag_path):
                         os.remove(pangenome_flag_path)
@@ -126,38 +195,59 @@ def main():
 
     path = os.path.dirname(os.path.realpath(__file__))
 
-    args = parse_arguments()
+    if len(sys.argv) == 1:
+        gui_args = launch_gui(CONFIG_FILENAME)
+        if not gui_args:
+            tqdm.write("[pegas] No arguments provided. Exiting.")
+            return
+        args = parse_arguments(gui_args)
+    else:
+        args = parse_arguments()
 
 
-    data_dir = args.data
-    output_dir = args.output
+    data_dir = os.path.abspath(os.path.expanduser(args.data))
+    output_dir = os.path.abspath(os.path.expanduser(args.output))
     cores = args.cores
     overwrite = args.overwrite
-    # rerun_pangenome = args.rerun_pangenome
 
-    # List all FASTQ files in the raw_data_path and raw_data directories
+    if not os.path.isdir(data_dir):
+        tqdm.write(f"[pegas] Input directory not found: {data_dir}")
+        sys.exit(1)
+
+    # List all FASTQ files in the raw_data_path and raw_data directories.
     raw_data_files = list_fastq_files(data_dir)
-    # copied_data_files = list_fastq_files(os.path.join(output_dir, "raw_data"))
+    if not raw_data_files:
+        tqdm.write(f"[pegas] No .fastq.gz files found in: {data_dir}")
+        sys.exit(1)
 
-    # Check if the output directory exists
+    sample_pairs = build_fastq_pairs(raw_data_files)
+    if not sample_pairs:
+        tqdm.write("[pegas] No valid R1/R2 pairs found in the input folder.")
+        sys.exit(1)
+
+    # Check if the output directory exists.
     if os.path.exists(output_dir) and not overwrite:
         tqdm.write("[pegas]Output directory already exists. Use --overwrite to overwrite it or specify a different directory.")
         sys.exit(1)
     else:
         os.makedirs(output_dir, exist_ok=True)
 
-    # Copy new or modified files from raw_data_path to raw_data
-    copy_files(output_dir, raw_data_files, "raw_data")
-
-    # Remove files in raw_data that do not exist in raw_data_path
+    # Remove outputs that do not exist in the input set.
     remove_extra_files(output_dir, "raw_data", raw_data_files)
+
+    # Save the run configuration for later reuse.
+    write_run_config(output_dir, data_dir, args)
+
+    # Write a manifest of FASTQ files and pairs for Snakemake.
+    manifest_path = write_sample_manifest(output_dir, raw_data_files, sample_pairs)
     
-    # Prepare configuration parameters
+    # Prepare configuration parameters.
     config_params = [
         f"raw_data='{data_dir}'",
         f"outdir='{output_dir}'",
         f"install_path='{path}'",
-        f"output_dir='{output_dir}'"
+        f"output_dir='{output_dir}'",
+        f"sample_manifest='{manifest_path}'"
     ]
 
     if args.shovill_cpu_cores:
@@ -169,7 +259,7 @@ def main():
     if args.gc:
         config_params.append(f"gc='{args.gc}'")
 
-    # Build the Snakemake command
+    # Build the Snakemake command.
     command = [
         "snakemake",
         "--snakefile", os.path.join(path, "Snakefile"),
@@ -187,11 +277,8 @@ def main():
         "--unlock"
     ]
 
-    # Add the --unlock flag if needed
-    # if args.unlock:
-    #     command.append("--unlock")
 
-    # Add the --config option and configuration parameters
+    # Add the --config option and configuration parameters.
     command.append("--config")
     command.extend(config_params)
 
@@ -201,7 +288,7 @@ def main():
     tqdm.write("Running PeGAS pipeline with the following command:")
     tqdm.write(" ".join(command))
 
-    # Run the pipeline
+    # Run the pipeline.
     subprocess.run(unlock_command)
     result = subprocess.run(command)
     if result.returncode != 0:

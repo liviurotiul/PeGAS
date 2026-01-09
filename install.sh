@@ -11,13 +11,11 @@ DEST_DIR="$PREFIX/share/pegas"
 # Create the destination directory if it doesn't exist
 mkdir -p "$DEST_DIR"
 
-# Copy the Snakefile to the destination directory
+# Copy the Snakefile and assets to the destination directory
 cp src/pegas/Snakefile "$DEST_DIR"
 cp src/pegas/layout.html "$DEST_DIR"
-cp src/pegas/prokka_env.yml "$DEST_DIR"
-cp src/pegas/mlst_env.yml "$DEST_DIR"
-cp src/pegas/abricate_env.yml "$DEST_DIR"
-cp src/pegas/shovill_env.yml "$DEST_DIR"
-cp src/pegas/fastqc_env.yml "$DEST_DIR"
-cp src/pegas/roary_env.yml "$DEST_DIR"
-cp src/pegas/gc_content.yml "$DEST_DIR"
+cp src/pegas/gc_content.json "$DEST_DIR"
+
+# Copy conda envs into a dedicated folder
+mkdir -p "$DEST_DIR/envs"
+cp src/pegas/envs/*.yml "$DEST_DIR/envs/"

@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import json
 import pandas as pd
 import warnings
 
@@ -10,9 +11,11 @@ from build_dataframe import build_dataframe
 from build_report import build_report
 
 warnings.filterwarnings("ignore")
+READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
 
 # Load configuration variables
-raw_data_path = config.get("raw_data", None)
+raw_data_path = config.get("raw_data", "raw_data")
+sample_manifest_path = config.get("sample_manifest", None)
 list_of_samples = config.get("samples", None)
 install_path = config.get("install_path", None)
 shovill_cpus = config.get("shovill_cpu_cores", 1)
@@ -21,42 +24,81 @@ roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
 gc_path = config.get("gc", None)
 
-# Ensure the raw_data directory exists
-os.makedirs("raw_data", exist_ok=True)
-
 html_path = f"{install_path}"
 # ================= Utility Functions =================
 
 def list_fastq_files(path):
     """Returns a list of all .fastq.gz files in the specified path."""
-    return [f for f in glob(os.path.join(path, "*.fastq.gz"))]
+    full_path = os.path.abspath(os.path.expanduser(path))
+    return [f for f in glob(os.path.join(full_path, "*.fastq.gz"))]
+
+def parse_fastq_read(filename):
+    base = os.path.basename(filename)
+    if not base.endswith(".fastq.gz"):
+        return None
+    stem = base[:-9]
+    matches = list(READ_TOKEN_RE.finditer(stem))
+    if not matches:
+        return None
+    match = matches[-1]
+    sample = stem[:match.start()].rstrip("._-")
+    if not sample:
+        return None
+    return sample, f"R{match.group(1)}"
 
 def get_core_sample_name(filename):
     """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-    return os.path.basename(filename).replace("_R1", "").replace("_R2", "").replace(".fastq.gz", "")
+    parsed = parse_fastq_read(filename)
+    if parsed:
+        return parsed[0]
+    base = os.path.basename(filename)
+    if base.endswith(".fastq.gz"):
+        return base[:-9]
+    return os.path.splitext(base)[0]
 
 def build_fastq_pairs(fastq_files):
     """Pairs R1 and R2 files based on sample names."""
     pairs = {}
+    unmatched = []
     for file in fastq_files:
-        sample = get_core_sample_name(file)
-        if sample:
-            if sample not in pairs:
-                pairs[sample] = {}
-            if "_R1" in file or "R1" in file:
-                pairs[sample]["R1"] = file
-            elif "_R2" in file or "R2" in file:
-                pairs[sample]["R2"] = file
+        parsed = parse_fastq_read(file)
+        if not parsed:
+            unmatched.append(file)
+            continue
+        sample, read = parsed
+        if sample not in pairs:
+            pairs[sample] = {}
+        pairs[sample][read] = file
+    orphan_samples = sorted([
+        sample for sample, reads in pairs.items()
+        if "R1" not in reads or "R2" not in reads
+    ])
+    if unmatched:
+        preview = ", ".join(os.path.basename(f) for f in unmatched[:5])
+        more = f" (+{len(unmatched) - 5} more)" if len(unmatched) > 5 else ""
+        tqdm.write(f"[pegas] Warning: {len(unmatched)} FASTQ files did not match the R1/R2 pattern: {preview}{more}")
+    if orphan_samples:
+        preview = ", ".join(orphan_samples[:5])
+        more = f" (+{len(orphan_samples) - 5} more)" if len(orphan_samples) > 5 else ""
+        tqdm.write(f"[pegas] Warning: {len(orphan_samples)} samples missing R1 or R2: {preview}{more}")
     # Filter out incomplete pairs
     return {s: p for s, p in pairs.items() if "R1" in p and "R2" in p}
 
 
 # ================= Data Preparation =================
 
-fastq_files = list_fastq_files("raw_data")
+if sample_manifest_path and os.path.exists(sample_manifest_path):
+    with open(sample_manifest_path, "r") as f:
+        sample_manifest = json.load(f)
+    fastq_files = sample_manifest.get("fastq_files", [])
+    sample_pairs = sample_manifest.get("sample_pairs", {})
+else:
+    fastq_files = list_fastq_files(raw_data_path)
+    sample_pairs = build_fastq_pairs(fastq_files)
+
 file_names = [os.path.basename(f).replace(".fastq.gz", "") for f in fastq_files]
-sample_pairs = build_fastq_pairs(fastq_files)
 sample_names = list(sample_pairs.keys())
+fastq_lookup = {os.path.basename(f).replace(".fastq.gz", ""): f for f in fastq_files}
 
 # ================= Snakemake Workflow =================
 
@@ -89,17 +131,16 @@ rule all:
             "results/{sample}/prokka/{sample}.gff",
             sample=sample_pairs.keys()
         ),
-        report="report/report.html",
-        flag="flags/.report"
+        report="report/report.html"
 
 rule fastqc:
     input:
-        fastq_files="raw_data/{file}.fastq.gz"
+        fastq_files=lambda wildcards: fastq_lookup[wildcards.file]
     output:
         html="fastqc/{file}_fastqc.html",
         html_zip="fastqc/{file}_fastqc.zip",
     conda:
-        "fastqc_env.yml"
+        "envs/fastqc_env.yml"
     shell:
         """
         mkdir -p fastqc
@@ -112,14 +153,14 @@ rule shovill:
         R2=lambda wildcards: sample_pairs[wildcards.sample]["R2"]
     output:
         assembly="results/{sample}/shovill/contigs.fa",
-        gfa="results/{sample}/shovill/contigs.gfa",
+        gfa="results/{sample}/shovill/spades.gfa",
         corrections="results/{sample}/shovill/shovill.corrections",
         log="results/{sample}/shovill/shovill.log",
         spades="results/{sample}/shovill/spades.fasta"
     threads:
         shovill_cpus
     conda:
-        "shovill_env.yml"
+        "envs/shovill_env.yml"
     shell:
         r"""
         set -euo pipefail
@@ -147,7 +188,7 @@ rule abricate_ncbi:
     output:
         abricate="results/{sample}/abricate_ncbi.tsv"
     conda:
-        "abricate_env.yml"
+        "envs/abricate_env.yml"
     shell:
         "abricate --db ncbi {input.assembly} > {output.abricate}"
 
@@ -157,7 +198,7 @@ rule abricate_plasmidfinder:
     output:
         abricate="results/{sample}/abricate_plasmidfinder.tsv"
     conda:
-        "abricate_env.yml"
+        "envs/abricate_env.yml"
     shell:
         "abricate --db plasmidfinder {input.assembly} > {output.abricate}"
 
@@ -167,7 +208,7 @@ rule abricate_vfdb:
     output:
         abricate="results/{sample}/abricate_vfdb.tsv"
     conda:
-        "abricate_env.yml"
+        "envs/abricate_env.yml"
     shell:
         "abricate --db vfdb {input.assembly} > {output.abricate}"
 
@@ -177,7 +218,7 @@ rule mlst:
     output:
         mlst="results/{sample}/mlst.tsv"
     conda:
-        "mlst_env.yml"
+        "envs/mlst_env.yml"
     shell:
         "mlst {input.assembly} > {output.mlst}"
 
@@ -197,14 +238,16 @@ rule prokka:
         tbl="results/{sample}/prokka/{sample}.tbl",
         tsv="results/{sample}/prokka/{sample}.tsv",
         txt="results/{sample}/prokka/{sample}.txt"
+    threads:
+        prokka_cpus
     conda:
-        "prokka_env.yml"
+        "envs/prokka_env.yml"
     shell:
         r"""
         set -euo pipefail
         if ! prokka --centre X --compliant {input.assembly} \
             --outdir results/{wildcards.sample}/prokka/ \
-            --force --cpus {prokka_cpus} \
+            --force --cpus {threads} \
             --prefix {wildcards.sample}; then
             echo -e "\n[ERROR] Prokka failed for sample {wildcards.sample}. Creating empty outputs. Check {output.log} for details." >&2
             mkdir -p results/{wildcards.sample}/prokka
@@ -290,22 +333,35 @@ def get_pangenome_prokka_outputs(wildcards):
             prokka_files.append(f"results/{sample}/prokka/{sample}.gff")
     return prokka_files
 
-rule pangenome:
+checkpoint pangenome:
     input:
         dataframe="dataframe/results.csv",
         prokka_outputs=get_pangenome_prokka_outputs
     output:
-        "flags/.pangenome"
+        pangenome_dir=directory("pangenome")
+    threads:
+        roary_cpus
     conda:
-        "roary_env.yml"
+        "envs/roary_env.yml"
     script:
         "run_roary.py"
 
+def get_pangenome_outputs(wildcards):
+    df_output = checkpoints.build_dataframe.get().output[0]
+    df = pd.read_csv(df_output, dtype={'SAMPLE': str})
+    df_grouped = df.groupby('SPECIES')['SAMPLE'].nunique().reset_index()
+    eligible_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
+    checkpoints.pangenome.get().output[0]
+    outputs = []
+    for sp in eligible_species:
+        outputs.append(f"pangenome/{sp}/output/gene_presence_absence.csv")
+        outputs.append(f"pangenome/{sp}/output/summary_statistics.txt")
+    return outputs
+
 rule build_report:
     input:
-        pangenome="flags/.pangenome",
+        pangenome_outputs=get_pangenome_outputs,
     output:
-        report="report/report.html",
-        flag="flags/.report"
+        report="report/report.html"
     run:
         build_report(html_path, raw_data_path, work_directory, gc_path)
