@@ -10,7 +10,7 @@ class CustomInstallCommand(install):
 
 setup(
     name='pegas',
-    version='1.1.0',
+    version='1.2.0',
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,
@@ -23,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pegas=pegas.main:main',
+            'pegas-lite=pegas.main_lite:main',
         ],
     },
 )
