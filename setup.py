@@ -20,10 +20,4 @@ setup(
     data_files=[
         ('', ['install.sh']),  # Include the install script
     ],
-    entry_points={
-        'console_scripts': [
-            'pegas=pegas.main:main',
-            'pegas-lite=pegas.main_lite:main',
-        ],
-    },
 )
