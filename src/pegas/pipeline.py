@@ -21,9 +21,12 @@ try:
         remove_extra_files,
     )
 except ImportError:
-    from build_dataframe import build_dataframe
-    from build_report import build_report
-    from main import (
+    package_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if package_root not in sys.path:
+        sys.path.insert(0, package_root)
+    from pegas.build_dataframe import build_dataframe
+    from pegas.build_report import build_report
+    from pegas.main import (
         build_parser,
         finalize_arguments,
         list_fastq_files,

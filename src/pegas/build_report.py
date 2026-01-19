@@ -3,18 +3,18 @@ import os
 
 from jinja2 import Environment, FileSystemLoader
 
-from report_charts import create_subtype_polar_charts, generate_virulence_factor_bar_chart
-from report_contigs import create_contig_plot
-from report_data import generate_general_info_table, load_and_preprocess_data
-from report_mlst import create_sunburst_chart
-from report_pangenome import create_pangenome_heatmaps, create_pangenome_pie_charts
-from report_tables import (
+from .report_charts import create_subtype_polar_charts, generate_virulence_factor_bar_chart
+from .report_contigs import create_contig_plot
+from .report_data import generate_general_info_table, load_and_preprocess_data
+from .report_mlst import create_sunburst_chart
+from .report_pangenome import create_pangenome_heatmaps, create_pangenome_pie_charts
+from .report_tables import (
     create_annotation_tables,
     create_fastqc_table,
     generate_table_html_for_species,
     generate_virulence_factor_table,
 )
-from utils import (
+from .utils import (
     assembly_qc_help_text_html,
     assign_colors,
     create_figure_json,

@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from plotly.colors import qualitative
 from tqdm import tqdm
 
-from utils import configure_pie_chart, fix_colorbar
+from .utils import configure_pie_chart, fix_colorbar
 
 
 def create_pangenome_heatmaps(species_dict):

@@ -2,13 +2,12 @@ import os
 import re
 import shutil
 import json
+import sys
 import pandas as pd
 import warnings
 
 from glob import glob
 from tqdm import tqdm
-from build_dataframe import build_dataframe
-from build_report import build_report
 
 warnings.filterwarnings("ignore")
 READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
@@ -17,7 +16,7 @@ READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
 raw_data_path = config.get("raw_data", "raw_data")
 sample_manifest_path = config.get("sample_manifest", None)
 list_of_samples = config.get("samples", None)
-install_path = config.get("install_path", None)
+install_path = config.get("install_path", None) or os.path.dirname(os.path.realpath(__file__))
 shovill_cpus = config.get("shovill_cpu_cores", 1)
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
@@ -25,6 +24,13 @@ work_directory = config.get("output_dir", None)
 gc_path = config.get("gc", None)
 
 html_path = f"{install_path}"
+
+package_root = os.path.dirname(install_path)
+if package_root not in sys.path:
+    sys.path.insert(0, package_root)
+
+from pegas.build_dataframe import build_dataframe
+from pegas.build_report import build_report
 # ================= Utility Functions =================
 
 def list_fastq_files(path):

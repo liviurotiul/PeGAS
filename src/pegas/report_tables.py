@@ -5,7 +5,7 @@ import pandas as pd
 from bs4 import BeautifulSoup as bs
 from tqdm import tqdm
 
-from utils import create_html_widget
+from .utils import create_html_widget
 
 
 def create_annotation_tables(df, species_dict):

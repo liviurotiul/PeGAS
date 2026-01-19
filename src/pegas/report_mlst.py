@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils import dilute_hex_color
+from .utils import dilute_hex_color
 
 
 def create_sunburst_chart(df, species_dict, species_color_mapping, output_dir):
