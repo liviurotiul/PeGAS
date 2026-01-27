@@ -1,14 +1,6 @@
 # Utility functions for handling files and database operations.
 import os
-import fnmatch
-import shutil
-import subprocess
 import random
-import plotly.io as pio
-
-from tqdm import tqdm
-from subprocess import call
-from typing import List, Dict, Tuple
 
 def generate_color():
     # Generate a random hue value between 0 and 360 (in degrees).
@@ -237,51 +229,6 @@ def dilute_hex_color(hex_color, factor):
     return '#{:02x}{:02x}{:02x}'.format(r, g, b)
 
 
-def find_file(filename, search_path):
-    """Recursively searches for a file in a given directory and its subdirectories."""
-
-    # Iterate through all items in the search path.
-    for root, dirnames, filenames in os.walk(search_path):
-
-        # Check if the file exists in the current directory.
-        if filename in filenames:
-            return os.path.join(root, filename)
-
-    # If the file was not found in any of the directories, return None.
-    return None
-
-
-def create_html_card(widget, title, width="8", min_height="300px"):
-
-    collapse_id = "collapse_" + str(random.randint(0, 10**10))
-
-    card_template = f"""
-    <div class="row">
-        <div class="col-xl-12">
-            <div class="accordion" id="accordionExample">
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="headingOne">
-                        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#{collapse_id}" aria-expanded="true">
-                            {title}
-                        </button>
-                    </h2>
-                    <div id="{collapse_id}" class="accordion-collapse collapse show" data-bs-parent="#accordionExample">
-                        <div class="accordion-body">
-                            <div class="card shadow mb-4 h-90">
-                                <!-- Card Body -->
-                                <div class="card-body">
-                                {widget}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>                        
-        </div>
-    </div>
-    """
-    return card_template
-
 def create_html_widget(widget, title, width="8", min_height="300px"):
 
     collapse_id = "collapse_" + str(random.randint(0, 10**10))
@@ -312,80 +259,6 @@ def configure_pie_chart(pie_chart_figure):
 
     return pie_chart_figure
 
-
-def connection_graph_string_format(hover_str, df, accession_product):
-
-    ncbi, plasmids, vfdb = [], [], []
-    ret_str = ""
-    for item in hover_str:
-        if item in df['ncbi_resistance'].sum():
-            ncbi.append(accession_product[item])
-        if item in df['plasmids'].sum():
-            plasmids.append(accession_product[item])
-        if item in df['virulence_factors'].sum():
-            vfdb.append(accession_product[item])
-
-    if len(ncbi):
-        ret_str = ret_str + "<b>resistance factors</b>: <br> " + str(ncbi)
-    if len(plasmids):
-        ret_str = ret_str + "<br><b>plasmids</b>:<br> " + str(plasmids)
-    if len(ncbi):
-        ret_str = ret_str + "<br><b>virulence_factors</b>: <br> " + str(vfdb)
-
-    ret_str = ret_str.translate(str.maketrans({'[': '', ']': '', '\'': '', ',': '<br>'}))
-
-    return ret_str
-
-
-def find_html_files(path):
-    html_files = []
-    for root, dirs, files in os.walk(path):
-        for file in files:
-            if file.endswith(".html"):
-                html_files.append(os.path.join(root, file))
-    return html_files
-
-
-def create_html_element(widget, title):
-    """
-    Converts a Plotly figure to an HTML string suitable for embedding in a report.
-
-    Parameters:
-    - widget (go.Figure): The Plotly figure to convert.
-    - title (str): The title to display above the figure.
-
-    Returns:
-    - html_with_title (str): The HTML string containing the figure and optional title.
-    """
-    # Update the figure layout.
-    widget.update_layout(
-        autosize=True,
-        height=600,  # Adjust height as needed.
-        margin=dict(l=50, r=50, t=50, b=50),
-        title={
-            'text': title,
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 20}
-        },
-        # You can include other layout settings as needed.
-    )
-
-    # Convert the Plotly figure to an HTML string.
-    html_str = pio.to_html(
-        widget,
-        full_html=False,
-        include_plotlyjs='cdn',
-        config={'responsive': True}
-    )
-
-    # Wrap the HTML with a container if needed.
-    html_with_title = f"""
-    <div class="figure-container">
-        {html_str}
-    </div>
-    """
-    return html_with_title
 
 def create_figure_with_table_json(widget, table_html, title, fig_id):
     """
@@ -449,52 +322,7 @@ def fix_colorbar(figure, facet, dtick=None):
     
     return figure
 
-def find_file(filename, search_path):
-    """Recursively searches for a file in a given directory and its subdirectories."""
-
-    # Iterate through all items in the search path.
-    for root, dirnames, filenames in os.walk(search_path):
-
-        # Check if the file exists in the current directory.
-        if filename in filenames:
-            return os.path.join(root, filename)
-
-    # If the file was not found in any of the directories, return None.
-    return None
-
 def create_figure_json(widget, title, fig_id):
-    """
-    Converts a Plotly figure to JSON data for deferred rendering.
-
-    Parameters:
-    - widget (go.Figure): The Plotly figure.
-    - title (str): The title for the figure.
-    - fig_id (str): A unique identifier for the figure.
-
-    Returns:
-    - dict: A dictionary containing the figure data and metadata.
-    """
-    # Ensure the figure has a unique ID.
-    if not fig_id:
-        raise ValueError("fig_id is required to uniquely identify the figure.")
-
-    # Update the figure layout if needed.
-    widget.update_layout(
-        autosize=True,
-        margin=dict(l=50, r=50, t=50, b=50)
-    )
-
-    # Serialize the figure to JSON.
-    fig_json = widget.to_json()
-
-    # Return a dictionary with the figure data.
-    return {
-        'fig_id': fig_id,
-        'fig_json': fig_json,
-        'title': title
-    }
-
-def create_figure_json_windrose(widget, title, fig_id):
     """
     Converts a Plotly figure to JSON data for deferred rendering.
 

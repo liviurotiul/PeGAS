@@ -27,6 +27,8 @@ def launch_gui(config_filename="pegas_config.json"):
     roary_var = tk.StringVar()
     gc_var = tk.StringVar(value=default_gc)
     overwrite_var = tk.BooleanVar(value=False)
+    html_report_var = tk.BooleanVar(value=False)
+    no_r_report_var = tk.BooleanVar(value=False)
 
     def apply_config(config_data):
         if not isinstance(config_data, dict):
@@ -52,6 +54,12 @@ def launch_gui(config_filename="pegas_config.json"):
         overwrite = config_data.get("overwrite")
         if overwrite is not None:
             overwrite_var.set(bool(overwrite))
+        html_report = config_data.get("html_report")
+        if html_report is not None:
+            html_report_var.set(bool(html_report))
+        r_report = config_data.get("r_report")
+        if r_report is not None:
+            no_r_report_var.set(not bool(r_report))
 
     def load_config_for_output(output_dir):
         output_dir = output_dir.strip()
@@ -147,6 +155,10 @@ def launch_gui(config_filename="pegas_config.json"):
             args_list += ["--gc", gc_path]
         if overwrite_var.get():
             args_list.append("--overwrite")
+        if html_report_var.get():
+            args_list.append("--html-report")
+        if no_r_report_var.get():
+            args_list.append("--no-r-report")
 
         result["args"] = args_list
         root.destroy()
@@ -157,16 +169,16 @@ def launch_gui(config_filename="pegas_config.json"):
     root.protocol("WM_DELETE_WINDOW", on_cancel)
 
     row = 0
+    tk.Label(root, text="Input FASTQ directory").grid(row=row, column=0, sticky="w", padx=8, pady=4)
+    tk.Entry(root, textvariable=data_var, width=50).grid(row=row, column=1, padx=8, pady=4)
+    tk.Button(root, text="Browse", command=browse_data).grid(row=row, column=2, padx=8, pady=4)
+    row += 1
+
     tk.Label(root, text="Output directory").grid(row=row, column=0, sticky="w", padx=8, pady=4)
     output_entry = tk.Entry(root, textvariable=output_var, width=50)
     output_entry.grid(row=row, column=1, padx=8, pady=4)
     output_entry.bind("<FocusOut>", lambda event: load_config_for_output(output_var.get()))
     tk.Button(root, text="Browse", command=browse_output).grid(row=row, column=2, padx=8, pady=4)
-    row += 1
-
-    tk.Label(root, text="Input FASTQ directory").grid(row=row, column=0, sticky="w", padx=8, pady=4)
-    tk.Entry(root, textvariable=data_var, width=50).grid(row=row, column=1, padx=8, pady=4)
-    tk.Button(root, text="Browse", command=browse_data).grid(row=row, column=2, padx=8, pady=4)
     row += 1
 
     tk.Label(root, text="Total cores (optional)").grid(row=row, column=0, sticky="w", padx=8, pady=4)
@@ -191,6 +203,12 @@ def launch_gui(config_filename="pegas_config.json"):
     row += 1
 
     tk.Checkbutton(root, text="Overwrite output directory", variable=overwrite_var).grid(row=row, column=1, sticky="w", padx=8, pady=6)
+    row += 1
+
+    tk.Checkbutton(root, text="Generate legacy HTML report", variable=html_report_var).grid(row=row, column=1, sticky="w", padx=8, pady=4)
+    row += 1
+
+    tk.Checkbutton(root, text="Disable R report (default on)", variable=no_r_report_var).grid(row=row, column=1, sticky="w", padx=8, pady=4)
     row += 1
 
     tk.Button(root, text="Run", command=on_run).grid(row=row, column=1, sticky="e", padx=8, pady=8)

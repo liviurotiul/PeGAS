@@ -21,9 +21,25 @@ shovill_cpus = config.get("shovill_cpu_cores", 1)
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
-gc_path = config.get("gc", None)
+gc_path = config.get("gc", "") or ""
+r_report = config.get("r_report", True)
+if isinstance(r_report, str):
+    r_report = r_report.lower() in ("1", "true", "yes", "y")
+html_report = config.get("html_report", False)
+if isinstance(html_report, str):
+    html_report = html_report.lower() in ("1", "true", "yes", "y")
 
 html_path = f"{install_path}"
+rmd_template_path = os.path.join(install_path, "report_template.Rmd")
+r_render_script_path = os.path.join(install_path, "render_report.R")
+r_report_outputs = ["report/report_r.html"] if r_report else []
+html_report_outputs = ["report/report.html"] if html_report else []
+
+try:
+    import importlib.metadata as metadata
+    pegas_version = metadata.version("pegas")
+except Exception:
+    pegas_version = "unknown"
 
 package_root = os.path.dirname(install_path)
 if package_root not in sys.path:
@@ -137,7 +153,8 @@ rule all:
             "results/{sample}/prokka/{sample}.gff",
             sample=sample_pairs.keys()
         ),
-        report="report/report.html"
+        report=html_report_outputs,
+        r_report=r_report_outputs
 
 rule fastqc:
     input:
@@ -371,3 +388,33 @@ rule build_report:
         report="report/report.html"
     run:
         build_report(html_path, raw_data_path, work_directory, gc_path)
+
+rule build_r_report:
+    input:
+        dataframe="dataframe/results.csv",
+        rmd_template=rmd_template_path,
+        render_script=r_render_script_path
+    output:
+        html="report/report_r.html"
+    params:
+        data_dir=raw_data_path,
+        output_dir=work_directory,
+        gc_path=gc_path,
+        report_html="report/report.html" if html_report else "",
+        pegas_version=pegas_version,
+        pegas_install_dir=install_path
+    conda:
+        "envs/report_r_env.yml"
+    shell:
+        r"""
+        Rscript "{input.render_script}" \
+            --rmd "{input.rmd_template}" \
+            --output "{output.html}" \
+            --dataframe_csv "{input.dataframe}" \
+            --report_html "{params.report_html}" \
+            --data_dir "{params.data_dir}" \
+            --output_dir "{params.output_dir}" \
+            --gc_path "{params.gc_path}" \
+            --pegas_version "{params.pegas_version}" \
+            --pegas_install_dir "{params.pegas_install_dir}"
+        """

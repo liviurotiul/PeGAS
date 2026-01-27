@@ -1,5 +1,8 @@
 include src/pegas/Snakefile
 include src/pegas/*.py
 include src/pegas/layout.html
+include src/pegas/report_template.Rmd
+include src/pegas/render_report.R
+include src/pegas/report_static.css
 include src/pegas/envs/*.yml
 include src/pegas/gc_content.json

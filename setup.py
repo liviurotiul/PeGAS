@@ -14,6 +14,12 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     include_package_data=True,
+    entry_points={
+        "console_scripts": [
+            "pegas=pegas.main:main",
+            "pegas-lite=pegas.main_lite:main",
+        ],
+    },
     cmdclass={
         'install': CustomInstallCommand,
     },

@@ -35,6 +35,10 @@ def build_parser():
     parser.add_argument("--gc", type=str,
                         default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json",
                         help="Custom JSON with GC content limits per species")
+    parser.add_argument("--no-r-report", action="store_true",
+                        help="Disable the default R HTML report")
+    parser.add_argument("--html-report", action="store_true",
+                        help="Generate the legacy HTML report (optional)")
     return parser
 
 def finalize_arguments(args):
@@ -141,7 +145,9 @@ def write_run_config(output_dir, data_dir, args):
         "shovill_cpu_cores": args.shovill_cpu_cores,
         "prokka_cpu_cores": args.prokka_cpu_cores,
         "roary_cpu_cores": args.roary_cpu_cores,
-        "gc": os.path.abspath(os.path.expanduser(args.gc)) if args.gc else ""
+        "gc": os.path.abspath(os.path.expanduser(args.gc)) if args.gc else "",
+        "r_report": not args.no_r_report,
+        "html_report": bool(args.html_report),
     }
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
@@ -247,7 +253,9 @@ def main():
         f"outdir='{output_dir}'",
         f"install_path='{path}'",
         f"output_dir='{output_dir}'",
-        f"sample_manifest='{manifest_path}'"
+        f"sample_manifest='{manifest_path}'",
+        f"r_report={not args.no_r_report}",
+        f"html_report={args.html_report}"
     ]
 
     if args.shovill_cpu_cores:

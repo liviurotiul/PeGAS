@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,7 @@ ENV_SPECS = {
     "mlst": "mlst_env.yml",
     "prokka": "prokka_env.yml",
     "roary": "roary_env.yml",
+    "report_r": "report_r_env.yml",
 }
 ENV_CACHE = {}
 CONDA_CHECKED = False
@@ -75,6 +77,24 @@ def hash_file(path):
         for chunk in iter(lambda: f.read(8192), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def get_pegas_version():
+    try:
+        import importlib.metadata as metadata
+        return metadata.version("pegas")
+    except Exception:
+        pass
+    try:
+        setup_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "setup.py")
+        with open(setup_path, "r") as f:
+            text = f.read()
+        match = re.search(r"version\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]", text)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return "unknown"
 
 
 def env_paths(tool_name):
@@ -312,6 +332,32 @@ def run_report(html_path, data_dir, output_dir, gc_path, work_dir):
     build_report(html_path, data_dir, output_dir, gc_path)
 
 
+def run_r_report(data_dir, output_dir, gc_path, work_dir, html_report=False):
+    ensure_dir(os.path.join(work_dir, "report"))
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    rmd_template = os.path.join(base_dir, "report_template.Rmd")
+    render_script = os.path.join(base_dir, "render_report.R")
+    html_output = os.path.join(work_dir, "report", "report_r.html")
+    report_html = os.path.join(work_dir, "report", "report.html") if html_report else ""
+    dataframe_csv = os.path.join(work_dir, "dataframe", "results.csv")
+    pegas_version = get_pegas_version()
+
+    cmd = [
+        "Rscript",
+        render_script,
+        "--rmd", rmd_template,
+        "--output", html_output,
+        "--dataframe_csv", dataframe_csv,
+        "--report_html", report_html,
+        "--data_dir", data_dir,
+        "--output_dir", output_dir,
+        "--gc_path", gc_path or "",
+        "--pegas_version", pegas_version,
+        "--pegas_install_dir", base_dir,
+    ]
+    run_command(cmd, cwd=work_dir, env_name="report_r")
+
+
 def run_pipeline(args):
     data_dir = os.path.abspath(os.path.expanduser(args.data))
     output_dir = os.path.abspath(os.path.expanduser(args.output))
@@ -360,7 +406,10 @@ def run_pipeline(args):
         os.chdir(work_dir)
         build_dataframe()
         run_roary(args.roary_cpu_cores, work_dir)
-        run_report(html_path, data_dir, output_dir, gc_path, work_dir)
+        if args.html_report:
+            run_report(html_path, data_dir, output_dir, gc_path, work_dir)
+        if not args.no_r_report:
+            run_r_report(data_dir, output_dir, gc_path, work_dir, html_report=args.html_report)
     finally:
         os.chdir(current_dir)
 

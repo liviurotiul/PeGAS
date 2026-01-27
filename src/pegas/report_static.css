@@ -1,0 +1,319 @@
+:root {
+  --page-width: 210mm;
+  --page-padding: 20mm;
+  --page-padding-inline: 30mm;
+  --content-width: 80vw;
+  --page-bg: #ffffff;
+  --frame-bg: #f2f2f2;
+  --ink: #111111;
+  --muted: #555555;
+  --accent: #0b4f6c;
+  --border: #dddddd;
+  --mono: "JetBrains Mono", "Fira Mono", "SFMono-Regular", monospace;
+  --sans: "Source Sans 3", "IBM Plex Sans", "Fira Sans", "Avenir Next", "Helvetica Neue", sans-serif;
+  --serif: "Source Serif 4", "Charter", "Georgia", serif;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--frame-bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.5;
+  padding: 0;
+}
+
+#TOC,
+.section {
+  width: var(--content-width);
+  max-width: var(--content-width);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 2vw;
+  padding-right: 2vw;
+  box-sizing: border-box;
+}
+
+.section {
+  padding-bottom: 12mm;
+}
+
+#TOC {
+  margin-bottom: 16mm;
+  font-size: 0.95em;
+}
+
+#TOC ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+#TOC li {
+  margin: 0 0 4px 0;
+}
+
+#TOC a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 1.2em;
+}
+
+h1 {
+  font-size: 28px;
+  letter-spacing: 0.3px;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 6px;
+}
+
+h2 {
+  font-size: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+h3 {
+  font-size: 16px;
+  color: var(--muted);
+}
+
+p, ul, ol {
+  font-size: 14px;
+}
+
+code, pre {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.qc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 10px 0 18px;
+}
+
+.qc-table th,
+.qc-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+  vertical-align: top;
+  word-break: break-word;
+  text-align: left;
+}
+
+.qc-table th {
+  text-align: left;
+  background: #f7f7f7;
+  font-weight: 600;
+}
+
+.qc-cell {
+  background: #ffffff;
+}
+
+.qc-flag {
+  background: rgba(220, 53, 69, 0.18);
+}
+
+.qc-num {
+  text-align: left;
+}
+
+.qc-text {
+  text-align: left;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 16px;
+  font-size: 13px;
+}
+
+.meta-table th,
+.meta-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.meta-table th {
+  width: 28%;
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.samples-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 18px;
+  font-size: 12px;
+}
+
+.samples-table th,
+.samples-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.samples-table th {
+  text-align: left;
+  background: #f7f7f7;
+  font-weight: 600;
+}
+
+.samples-table .sample-name {
+  font-weight: 600;
+}
+
+.samples-table .path-cell {
+  font-family: var(--mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.samples-table .size-cell {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.assembly-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 18px;
+  font-size: 12px;
+}
+
+.assembly-table th,
+.assembly-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.assembly-table th {
+  text-align: left;
+  background: #f7f7f7;
+  font-weight: 600;
+}
+
+.assembly-table .num-cell {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.annotation-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 18px;
+  font-size: 12px;
+}
+
+.annotation-table th,
+.annotation-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.annotation-table th {
+  text-align: left;
+  background: #f7f7f7;
+  font-weight: 600;
+}
+
+.vfdb-table {
+  --pill-color: 59, 130, 246;
+}
+
+.resistome-table {
+  --pill-color: 249, 115, 22;
+}
+
+.plasmid-table {
+  --pill-color: 34, 197, 94;
+}
+
+.annotation-table .species-cell {
+  font-weight: 600;
+  font-style: italic;
+  width: 10%;
+  max-width: 10%;
+  white-space: nowrap;
+}
+
+.annotation-table .sample-cell {
+  font-family: var(--mono);
+  font-size: 11px;
+  width: 15%;
+  max-width: 15%;
+  white-space: nowrap;
+}
+
+.annotation-table .genes-cell {
+  line-height: 1.6;
+}
+
+.mlst-table .species-cell {
+  width: 10%;
+  max-width: 10%;
+}
+
+.mlst-table .subtype-cell {
+  width: 5%;
+  max-width: 5%;
+}
+
+.mlst-table td,
+.mlst-table th {
+  white-space: nowrap;
+}
+
+.gene-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: rgba(var(--pill-color, 37, 99, 235), var(--pill-alpha, 0.45));
+  color: #0f172a;
+  margin: 2px 4px 2px 0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media print {
+  body {
+    background: #ffffff;
+  }
+  #TOC,
+  .section {
+    width: auto;
+    max-width: none;
+    padding-left: 20mm;
+    padding-right: 20mm;
+  }
+}

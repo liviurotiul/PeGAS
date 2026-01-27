@@ -14,6 +14,9 @@ mkdir -p "$DEST_DIR"
 # Copy the Snakefile and assets to the destination directory
 cp src/pegas/Snakefile "$DEST_DIR"
 cp src/pegas/layout.html "$DEST_DIR"
+cp src/pegas/report_template.Rmd "$DEST_DIR"
+cp src/pegas/render_report.R "$DEST_DIR"
+cp src/pegas/report_static.css "$DEST_DIR"
 cp src/pegas/gc_content.json "$DEST_DIR"
 
 # Copy conda envs into a dedicated folder

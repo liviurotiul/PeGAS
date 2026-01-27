@@ -1,141 +1,85 @@
-
-
-  
-  
-
 # PeGAS: A Comprehensive Bioinformatic Solution for Pathogenic Bacterial Genomic Analysis
 
-  
-
-This is PeGAS, a powerful bioinformatic tool designed for the seamless quality control, assembly, and annotation of Illumina paired-end reads specific to pathogenic bacteria. This tool integrates state-of-the-art open-source software to provide a streamlined and efficient workflow, ensuring accurate insights into the genomic makeup of pathogenic microbial strains.
-
-  
-
-<br/>
-
-  
+This is PeGAS, a bioinformatic tool designed for seamless QC, assembly, and annotation of Illumina paired-end reads from pathogenic bacteria. It integrates widely used open-source tools to deliver reproducible genomic analysis and reporting.
 
 ## Key Features
 
-  
-  
-
-- **Quality Control:** Utilize industry-standard tools such as FastQC, and Cutadapt to assess and enhance the quality of Illumina paired-end reads.
-
-  
-
-- **Assembly:** PeGAS uses SPADES for de novo genome assembly, ensuring comprehensive coverage and accurate representation of pathogenic bacterial genomes.
-
-  
-
-- **Annotation:** We employ abricate for specific gene profiling and prokka for pangenomic analysis
-
-  
-
-- **Visualization:** PeGAS uses Plotly for interactive data visualisation in the browser
-
-  
-
-- **Parallel execution:** Using Snakemake as a base, the workflow is mostly parallel allowing for fast execution
-
-  
+- **Quality Control:** FastQC-based QC for Illumina paired-end reads.
+- **Assembly:** De novo assembly using SPAdes (via Shovill).
+- **Annotation:** Abricate for gene profiling and Prokka for pangenome inputs.
+- **Reports:** Clean, static R HTML report by default, with an optional legacy interactive HTML report.
+- **GUI:** Launch a simple GUI to configure runs without remembering CLI flags.
+- **Parallel execution:** Multi-core execution across pipeline steps, with per-tool core controls.
 
 ![Alt text](Features.png)
 
-  
-
-<img  src="SunburstDemo1.gif"  width="100%">
-
-  
+<img src="SunburstDemo1.gif" width="100%">
 
 ## How to Use
 
-  
-  
-
 ### 1. Prerequisites
 
-  
+- **Conda** (Miniforge or Miniconda recommended)
 
-- **CONDA**
+To check your conda install:
 
-  
-
-**IMPORTANT**: PeGAS uses **snakemake** as a base which needs **mamba**, a reimplementation of conda in C++. As far as we know, mamba can **only** be installed alongside miniconda or miniforge. The installation alongside anaconda is not yet possible.
-
-  
-
-To find out if you have miniconda or anaconda you can open a terminal and type:
-
-  
-
-```
+```bash
 (base)user@user:~$ conda info
 ```
 
-  
+If you **don't have conda yet installed**, we recommend Miniforge: https://conda-forge.org/download/
 
-You should be able to see either miniconda or anaconda.
+### 2. pegas vs pegas-lite
 
-  
+- **pegas:** Full distribution. Recommended if you want everything installed in one environment.
+- **pegas-lite:** Lightweight distribution. Same CLI and GUI, but keeps the base environment small and creates per-tool conda envs on demand under `~/.pegas/envs`.
 
-If you **don't have conda yet installed** we recommend conda [[Miniforge](https://github.com/conda-forge/miniforge?tab=readme-ov-file)](https://conda-forge.org/download/)
-
-  
-
-- **Mamba:** After the conda installation, open a new terminal (so that the base environement is active and use this command to install Mamba:
+### 3. Installing pegas (full)
 
 ```bash
-
-(base)user@user:~$ conda install conda-forge::mamba
-
+(base)user@user:~$ conda create -n pegas -c bioconda -c conda-forge pegas
+(base)user@user:~$ conda activate pegas
 ```
 
-  
-
-### 2. Installing PeGAS
-
-  
-
-- PeGAS is easily installable with conda; just open a terminal and run this command:
-
-  
-  
-```
-(base)user@user:~$ conda install bioconda::pegas
-```
-or
-```
-(base)user@user:~$ conda create -n pegas -c bioconda -c conda-forge
-```
-
-### 3. Using PeGAS
-
-  
-
-- First set up a folder in a different path to the one where PeGAS was installed
-
-- Copy all your fastq.gz files in the folder with their original names
-
-  
-
-- Pegas should then work almost out of the box just by activating the **pegas** environment and running:
-
-  
+### 4. Installing pegas-lite (lightweight)
 
 ```bash
+(base)user@user:~$ conda create -n pegas-lite -c bioconda pegas-lite
+```
 
-usage: pegas [-h] -d DATA -o OUTPUT [-c CORES] [--overwrite] [--shovill-cpu-cores SHOVILL_CPU_CORES] [--prokka-cpu-cores PROKKA_CPU_CORES] [--roary-cpu-cores ROARY_CPU_CORES] [--gc GC]
+This creates a new environment called `pegas-lite` and installs the lightweight package from `bioconda`. Activate it with:
+
+```bash
+(base)user@user:~$ conda activate pegas-lite
+```
+
+### 5. Running from the CLI
+
+- Copy your `fastq.gz` files into a working folder (separate from the install path).
+- Run the pipeline from the activated environment:
+
+```bash
+pegas -d /path/to/fastqs -o /path/to/output --cores 16 --overwrite
+```
+
+Full usage (same for `pegas-lite`):
+
+```bash
+usage: pegas [-h] -d DATA -o OUTPUT [-c CORES] [--overwrite]
+             [--shovill-cpu-cores SHOVILL_CPU_CORES]
+             [--prokka-cpu-cores PROKKA_CPU_CORES]
+             [--roary-cpu-cores ROARY_CPU_CORES]
+             [--gc GC] [--no-r-report] [--html-report]
 
 Run the PeGAS pipeline.
 
 options:
   -h, --help            show this help message and exit
-  -d DATA, --data DATA  Directory containing all the fastq.gz files
+  -d DATA, --data DATA  Directory with fastq.gz files
   -o OUTPUT, --output OUTPUT
-                        Directory where output files will be saved
+                        Directory for outputs
   -c CORES, --cores CORES
-                        The number of cores to use
+                        Total cores to use (default: all)
   --overwrite           Overwrite the output directory if it exists
   --shovill-cpu-cores SHOVILL_CPU_CORES
                         Number of CPU cores to use for Shovill
@@ -143,16 +87,26 @@ options:
                         Number of CPU cores to use for Prokka
   --roary-cpu-cores ROARY_CPU_CORES
                         Number of CPU cores to use for Roary
-  --gc GC               Provide a custom json file path for GC content limits for each species
-
+  --gc GC               Custom JSON with GC content limits per species
+  --no-r-report         Disable the default R HTML report
+  --html-report         Generate the legacy HTML report (optional)
 ```
-A model for the json file can be found [here](https://github.com/liviurotiul/PeGAS/blob/main/src/pegas/gc_content.json)
-### 3. Visualising the results
 
-- After the files have been processed and the analysis is completed, you can visualise the results in the path, in the report folder and all the resulting files in the results folder
+A model for the GC JSON file can be found here:
+https://github.com/liviurotiul/PeGAS/blob/main/src/pegas/gc_content.json
 
-### PeGAS works out of the box on linux systems. For Windows and MAC users we recommend using virtualization software like Docker or WSL! 
+### 6. Reports and GUI
 
-### 4. Citation
+- **Default report:** `report/report_r.html` (clean, static, shareable)
+- **Legacy report (optional):** add `--html-report` to generate `report/report.html`
+- **GUI:** run `pegas` or `pegas-lite` with no arguments to launch the GUI. The GUI mirrors the CLI flags.
+
+### 7. Visualising the results
+
+After processing completes, check the `report/` folder and the `results/` folder inside the output directory.
+
+### PeGAS works out of the box on Linux systems. For Windows and macOS, we recommend using virtualization software like Docker or WSL.
+
+### 8. Citation
 
 Liviu-Iulian Rotaru, Marius Surleac, PeGAS: a versatile bioinformatics pipeline for antimicrobial resistance, virulence and pangenome analysis, Bioinformatics Advances, Volume 5, Issue 1, 2025, vbaf165, https://doi.org/10.1093/bioadv/vbaf165

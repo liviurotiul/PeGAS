@@ -1,0 +1,1159 @@
+---
+title: "PeGAS report"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    theme: null
+    highlight: null
+    self_contained: true
+    css: report_static.css
+params:
+  dataframe_csv: NULL
+  report_html: NULL
+  data_dir: NULL
+  output_dir: NULL
+  gc_path: NULL
+  pegas_version: NULL
+  pegas_install_dir: NULL
+  fastqc_files: NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+# Inputs and run info
+
+```{r report_summary, echo=FALSE, results='asis'}
+report_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+pegas_version <- params$pegas_version
+if (is.null(pegas_version) || pegas_version == "") {
+  pegas_version <- "Unknown"
+}
+sample_count <- NA
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df <- read.csv(params$dataframe_csv, stringsAsFactors = FALSE)
+  if ("SAMPLE" %in% names(df)) {
+    sample_count <- length(unique(df$SAMPLE))
+  } else {
+    sample_count <- nrow(df)
+  }
+}
+sample_text <- if (is.na(sample_count)) "Unknown" else as.character(sample_count)
+cat(paste0("<b>PeGAS version</b>: ", pegas_version, "  \n"))
+cat(paste0("<b>Date generated</b>: ", report_time, "  \n"))
+cat(paste0("<b>Samples analyzed</b>: ", sample_text, "\n"))
+```
+
+```{r input_summary, results='asis'}
+cat(paste0("<b>Input directory</b>: ", params$data_dir, "  \n"))
+cat(paste0("<b>Output directory</b>: ", params$output_dir, "  \n"))
+cat(paste0("<b>GC path</b>: ", params$gc_path, "  \n"))
+cat(paste0("<b>HTML report</b>: ", params$report_html, "\n"))
+```
+
+```{r sample_table, results='asis'}
+manifest_path <- NULL
+if (!is.null(params$output_dir) && params$output_dir != "") {
+  manifest_path <- file.path(params$output_dir, "sample_manifest.json")
+}
+
+format_mb <- function(bytes) {
+  if (is.na(bytes)) {
+    return("NA")
+  }
+  sprintf("%.2f", bytes / (1024 * 1024))
+}
+
+parse_fastq_read <- function(filename) {
+  base <- basename(filename)
+  if (!grepl("\\\\.(fastq|fq)(\\\\.gz)?$", base, ignore.case = TRUE)) {
+    return(NULL)
+  }
+  stem <- sub("\\\\.(fastq|fq)(\\\\.gz)?$", "", base, ignore.case = TRUE)
+  matches <- gregexpr("R([12])(?=$|[._-])", stem, perl = TRUE, ignore.case = TRUE)
+  positions <- matches[[1]]
+  if (length(positions) == 0 || positions[1] == -1) {
+    return(NULL)
+  }
+  last_pos <- tail(positions, 1)
+  lengths <- attr(positions, "match.length")
+  last_len <- tail(lengths, 1)
+  token <- substr(stem, last_pos, last_pos + last_len - 1)
+  sample <- substr(stem, 1, last_pos - 1)
+  sample <- sub("[._-]+$", "", sample)
+  if (nchar(sample) == 0) {
+    return(NULL)
+  }
+  read_num <- sub(".*([12]).*", "\\\\1", token)
+  list(sample = sample, read = paste0("R", read_num))
+}
+
+pairs <- list()
+if (!is.null(manifest_path) && file.exists(manifest_path)) {
+  suppressPackageStartupMessages(library(jsonlite))
+  manifest <- jsonlite::fromJSON(manifest_path)
+  if (!is.null(manifest$sample_pairs)) {
+    pairs <- manifest$sample_pairs
+  }
+} else {
+  fastq_files <- character(0)
+  if (!is.null(params$data_dir) && dir.exists(params$data_dir)) {
+    fastq_files <- list.files(params$data_dir, pattern = "\\\\.(fastq|fq)(\\\\.gz)?$", full.names = TRUE, ignore.case = TRUE)
+  }
+  for (f in fastq_files) {
+    parsed <- parse_fastq_read(f)
+    if (is.null(parsed)) {
+      next
+    }
+    sample <- parsed$sample
+    read <- parsed$read
+    if (is.null(pairs[[sample]])) {
+      pairs[[sample]] <- list()
+    }
+    pairs[[sample]][[read]] <- f
+  }
+}
+
+samples <- sort(names(pairs))
+if (length(samples) > 0) {
+  escape_html_sample <- function(x) {
+    if (is.null(x) || is.na(x)) {
+      return("NA")
+    }
+    x <- as.character(x)
+    x <- gsub("&", "&amp;", x, fixed = TRUE)
+    x <- gsub("<", "&lt;", x, fixed = TRUE)
+    x <- gsub(">", "&gt;", x, fixed = TRUE)
+    x <- gsub("\"", "&quot;", x, fixed = TRUE)
+    x <- gsub("'", "&#39;", x, fixed = TRUE)
+    x
+  }
+
+  row_html <- vapply(samples, function(sample) {
+    r1 <- pairs[[sample]][["R1"]]
+    r2 <- pairs[[sample]][["R2"]]
+    size_bytes <- 0
+    if (!is.null(r1) && file.exists(r1)) {
+      size_bytes <- size_bytes + file.info(r1)$size
+    }
+    if (!is.null(r2) && file.exists(r2)) {
+      size_bytes <- size_bytes + file.info(r2)$size
+    }
+    r1_text <- if (is.null(r1)) "" else r1
+    r2_text <- if (is.null(r2)) "" else r2
+    size_text <- format_mb(size_bytes)
+    paste0(
+      "<tr>",
+      "<td class=\"sample-name\">", escape_html_sample(sample), "</td>",
+      "<td class=\"path-cell\">", escape_html_sample(r1_text), "</td>",
+      "<td class=\"path-cell\">", escape_html_sample(r2_text), "</td>",
+      "<td class=\"size-cell\">", escape_html_sample(size_text), "</td>",
+      "</tr>"
+    )
+  }, character(1))
+
+  header_row <- paste0(
+    "<tr>",
+    "<th>Sample</th>",
+    "<th>R1 path</th>",
+    "<th>R2 path</th>",
+    "<th>Total size (Mb)</th>",
+    "</tr>"
+  )
+
+  table_html <- paste0(
+    "<table class=\"samples-table\">",
+    "<thead>", header_row, "</thead>",
+    "<tbody>", paste(row_html, collapse = ""), "</tbody>",
+    "</table>"
+  )
+  cat(table_html)
+} else {
+  cat("No FASTQ pairs found.\n")
+}
+```
+
+# QC (Sequencing and Assembly)
+
+## Sequencing QC
+
+```{r qc_table, results='asis'}
+suppressPackageStartupMessages(library(rvest))
+suppressPackageStartupMessages(library(xml2))
+
+load_species_dict <- function(path) {
+  if (is.null(path) || path == "" || !file.exists(path)) {
+    return(list())
+  }
+  lines <- readLines(path, warn = FALSE)
+  start <- grep("^species_dict\\s*=\\s*\\{", lines)
+  if (length(start) == 0) {
+    return(list())
+  }
+  entries <- lines[(start[1] + 1):length(lines)]
+  end <- grep("^\\}", entries)
+  if (length(end) > 0) {
+    entries <- entries[1:(end[1] - 1)]
+  }
+  out <- list()
+  for (line in entries) {
+    line <- trimws(line)
+    if (line == "" || substr(line, 1, 1) == "#") {
+      next
+    }
+    match <- regexec("^\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"", line)
+    parts <- regmatches(line, match)[[1]]
+    if (length(parts) >= 3) {
+      out[[parts[2]]] <- parts[3]
+    }
+  }
+  out
+}
+
+species_map <- load_species_dict(if (!is.null(params$pegas_install_dir)) {
+  file.path(params$pegas_install_dir, "utils.py")
+} else {
+  ""
+})
+
+sample_species <- list()
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df <- read.csv(params$dataframe_csv, stringsAsFactors = FALSE)
+  if ("SAMPLE" %in% names(df) && "SPECIES" %in% names(df)) {
+    unique_rows <- df[!duplicated(df$SAMPLE), c("SAMPLE", "SPECIES")]
+    for (i in seq_len(nrow(unique_rows))) {
+      code <- unique_rows$SPECIES[i]
+      name <- if (!is.null(species_map[[code]])) species_map[[code]] else code
+      sample_species[[unique_rows$SAMPLE[i]]] <- name
+    }
+  }
+}
+
+gc_expected <- list()
+if (!is.null(params$gc_path) && file.exists(params$gc_path)) {
+  suppressPackageStartupMessages(library(jsonlite))
+  gc_expected <- jsonlite::fromJSON(params$gc_path)
+}
+
+format_int <- function(x) {
+  if (is.na(x)) {
+    return("NA")
+  }
+  format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+}
+
+format_gc <- function(x) {
+  if (is.na(x)) {
+    return("NA")
+  }
+  sprintf("%.1f%%", x)
+}
+
+get_core_sample_name <- function(filename) {
+  base <- basename(filename)
+  base <- sub("_R1", "", base)
+  base <- sub("_R2", "", base)
+  base <- sub("\\\\.(fastq|fq)(\\\\.gz)?$", "", base, ignore.case = TRUE)
+  base <- sub("_fastqc\\\\.html$", "", base, ignore.case = TRUE)
+  base
+}
+
+get_read_direction_from_file <- function(file_path) {
+  base <- basename(file_path)
+  match <- regexec("_R([12])", base)
+  parts <- regmatches(base, match)[[1]]
+  if (length(parts) >= 2) {
+    return(paste0("R", parts[2]))
+  }
+  lower <- tolower(file_path)
+  if (grepl("read1", lower) || grepl("r1", file_path)) {
+    return("R1")
+  }
+  if (grepl("read2", lower) || grepl("r2", file_path)) {
+    return("R2")
+  }
+  NA
+}
+
+read_fastqc_html <- function(path) {
+  tryCatch(read_html(path), error = function(e) NULL)
+}
+
+extract_html_value <- function(doc, key) {
+  if (is.null(doc)) {
+    return(NA)
+  }
+  tds <- html_elements(doc, "td")
+  if (length(tds) == 0) {
+    return(NA)
+  }
+  texts <- html_text(tds, trim = TRUE)
+  idx <- match(key, texts)
+  if (is.na(idx) || idx + 1 > length(texts)) {
+    return(NA)
+  }
+  texts[[idx + 1]]
+}
+
+html_files <- character(0)
+if (!is.null(params$fastqc_files)) {
+  html_files <- as.character(unlist(params$fastqc_files))
+  html_files <- html_files[!is.na(html_files)]
+}
+if (length(html_files) > 0) {
+  html_files <- normalizePath(html_files, winslash = "/", mustWork = FALSE)
+  html_files <- html_files[file.exists(html_files)]
+}
+
+if (length(html_files) == 0) {
+  base_dirs <- c(getwd())
+  if (!is.null(params$output_dir) && params$output_dir != "") {
+    base_dirs <- c(base_dirs, params$output_dir)
+  }
+  if (!is.null(params$report_html) && params$report_html != "") {
+    base_dirs <- c(base_dirs, dirname(dirname(params$report_html)))
+  }
+  if (!is.null(params$dataframe_csv) && params$dataframe_csv != "") {
+    base_dirs <- c(base_dirs, dirname(dirname(params$dataframe_csv)))
+  }
+  if (!is.null(params$pegas_install_dir) && params$pegas_install_dir != "") {
+    pegas_parent <- dirname(params$pegas_install_dir)
+    base_dirs <- c(base_dirs, pegas_parent, dirname(pegas_parent))
+  }
+  base_dirs <- unique(base_dirs)
+
+  fastqc_dirs <- c("fastqc")
+  for (base in base_dirs) {
+    fastqc_dirs <- c(
+      fastqc_dirs,
+      file.path(base, "fastqc"),
+      file.path(base, "out", "fastqc")
+    )
+  }
+  fastqc_dirs <- unique(fastqc_dirs[dir.exists(fastqc_dirs)])
+
+  html_files <- unlist(lapply(fastqc_dirs, function(d) {
+    list.files(d, pattern = "\\\\.html$", full.names = TRUE, recursive = TRUE, ignore.case = TRUE)
+  }))
+  if (length(html_files) == 0) {
+    fallback_files <- unlist(lapply(base_dirs, function(d) {
+      if (!dir.exists(d)) {
+        return(character(0))
+      }
+      list.files(
+        d,
+        pattern = "_fastqc\\\\.html$",
+        full.names = TRUE,
+        recursive = TRUE,
+        ignore.case = TRUE
+      )
+    }))
+    html_files <- unique(fallback_files)
+  }
+}
+
+sample_names <- unique(vapply(html_files, get_core_sample_name, character(1)))
+sample_names <- sort(sample_names)
+
+search_strings <- c("Total Sequences", "Sequences flagged as poor quality", "%GC")
+cols <- c(
+  paste(search_strings, "R1"),
+  paste(search_strings, "R2")
+)
+df_qc <- data.frame(matrix(NA, nrow = length(sample_names), ncol = length(cols)),
+                    row.names = sample_names,
+                    stringsAsFactors = FALSE)
+colnames(df_qc) <- cols
+
+for (file_path in html_files) {
+  sample <- get_core_sample_name(file_path)
+  read_dir <- get_read_direction_from_file(file_path)
+  if (is.na(read_dir) || !(sample %in% sample_names)) {
+    next
+  }
+  doc <- read_fastqc_html(file_path)
+  for (key in search_strings) {
+    value <- extract_html_value(doc, key)
+    col_name <- paste(key, read_dir)
+    if (col_name %in% colnames(df_qc)) {
+      df_qc[sample, col_name] <- value
+    }
+  }
+}
+
+numeric_cols <- colnames(df_qc)
+for (col in numeric_cols) {
+  df_qc[[col]] <- suppressWarnings(as.numeric(gsub(",", "", df_qc[[col]])))
+}
+
+format_expected_gc <- function(value) {
+  if (is.na(value)) {
+    return("N/A")
+  }
+  sprintf("%.1f", value)
+}
+
+format_gc_with_expected <- function(actual, expected) {
+  actual_text <- if (is.na(actual)) "NA" else sprintf("%.1f", actual)
+  expected_text <- format_expected_gc(expected)
+  if (expected_text == "N/A") {
+    return(paste0(actual_text, "% (expected: N/A)"))
+  }
+  paste0(actual_text, "% (expected: ", expected_text, "%)")
+}
+
+escape_html <- function(x) {
+  if (is.na(x)) {
+    return("NA")
+  }
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+build_qc_table_html <- function(df, colors) {
+  if (is.null(df) || nrow(df) == 0) {
+    return("")
+  }
+  headers <- colnames(df)
+  col_classes <- ifelse(
+    grepl("reads|GC%|bad quality", headers, ignore.case = TRUE),
+    "qc-num",
+    "qc-text"
+  )
+  header_cells <- vapply(seq_along(headers), function(i) {
+    paste0("<th class=\"", col_classes[i], "\">", escape_html(headers[i]), "</th>")
+  }, character(1))
+  header_row <- paste0("<tr>", paste(header_cells, collapse = ""), "</tr>")
+
+  body_rows <- vapply(seq_len(nrow(df)), function(r) {
+    cells <- vapply(seq_along(headers), function(c) {
+      value <- df[r, c]
+      flagged <- !is.na(colors[r, c]) && colors[r, c] != ""
+      classes <- c("qc-cell", col_classes[c])
+      if (flagged) {
+        classes <- c(classes, "qc-flag")
+      }
+      paste0("<td class=\"", paste(classes, collapse = " "), "\">", escape_html(value), "</td>")
+    }, character(1))
+    paste0("<tr>", paste(cells, collapse = ""), "</tr>")
+  }, character(1))
+
+  paste0(
+    "<table class=\"qc-table\">",
+    "<thead>", header_row, "</thead>",
+    "<tbody>", paste(body_rows, collapse = ""), "</tbody>",
+    "</table>"
+  )
+}
+
+qc_rows <- list()
+color_rows <- list()
+if (length(sample_names) > 0) {
+  for (sample in sample_names) {
+    r1_total <- df_qc[sample, "Total Sequences R1"]
+    r2_total <- df_qc[sample, "Total Sequences R2"]
+    r1_poor <- df_qc[sample, "Sequences flagged as poor quality R1"]
+    r2_poor <- df_qc[sample, "Sequences flagged as poor quality R2"]
+    r1_gc <- df_qc[sample, "%GC R1"]
+    r2_gc <- df_qc[sample, "%GC R2"]
+
+    expected_gc <- NA
+    species_name <- sample_species[[sample]]
+    if (!is.null(species_name) && !is.null(gc_expected[[species_name]])) {
+      expected_gc <- suppressWarnings(as.numeric(gc_expected[[species_name]]))
+    }
+
+    r1_pct <- if (!is.na(r1_total) && r1_total > 0 && !is.na(r1_poor)) {
+      (r1_poor / r1_total) * 100
+    } else {
+      NA
+    }
+    r2_pct <- if (!is.na(r2_total) && r2_total > 0 && !is.na(r2_poor)) {
+      (r2_poor / r2_total) * 100
+    } else {
+      NA
+    }
+
+    r1_reads <- format_int(r1_total)
+    r2_reads <- format_int(r2_total)
+
+    r1_poor_text <- if (is.na(r1_poor) || is.na(r1_total) || r1_total <= 0) {
+      "NA"
+    } else {
+      paste0(format_int(r1_poor), " (", sprintf("%.2f", r1_pct), "%)")
+    }
+    r2_poor_text <- if (is.na(r2_poor) || is.na(r2_total) || r2_total <= 0) {
+      "NA"
+    } else {
+      paste0(format_int(r2_poor), " (", sprintf("%.2f", r2_pct), "%)")
+    }
+
+    r1_gc_text <- format_gc_with_expected(r1_gc, expected_gc)
+    r2_gc_text <- format_gc_with_expected(r2_gc, expected_gc)
+
+    r1_gc_problem <- is.na(expected_gc) || is.na(r1_gc) || abs(r1_gc - expected_gc) > 6
+    r2_gc_problem <- is.na(expected_gc) || is.na(r2_gc) || abs(r2_gc - expected_gc) > 6
+
+    r1_poor_problem <- !is.na(r1_pct) && r1_pct > 0
+    r2_poor_problem <- !is.na(r2_pct) && r2_pct > 0
+
+    qc_rows[[length(qc_rows) + 1]] <- data.frame(
+      Sample = sample,
+      `R1 reads` = r1_reads,
+      `R1 GC%` = r1_gc_text,
+      `R1 bad quality reads` = r1_poor_text,
+      `R2 reads` = r2_reads,
+      `R2 GC%` = r2_gc_text,
+      `R2 bad quality reads` = r2_poor_text,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+
+    color_rows[[length(color_rows) + 1]] <- c(
+      NA,
+      NA,
+      if (r1_gc_problem) "#f8d7da" else NA,
+      if (r1_poor_problem) "#f8d7da" else NA,
+      NA,
+      if (r2_gc_problem) "#f8d7da" else NA,
+      if (r2_poor_problem) "#f8d7da" else NA
+    )
+  }
+}
+
+if (length(qc_rows) > 0) {
+  qc_table <- do.call(rbind, qc_rows)
+  color_matrix <- do.call(rbind, color_rows)
+  colnames(color_matrix) <- colnames(qc_table)
+  table_html <- build_qc_table_html(qc_table, color_matrix)
+  cat(table_html)
+} else {
+  cat("No FastQC data found.\n")
+}
+```
+
+## Assembly QC
+
+```{r assembly_qc_data, include=FALSE}
+suppressPackageStartupMessages(library(ggplot2))
+
+calc_n50 <- function(sorted_lengths) {
+  if (length(sorted_lengths) == 0) {
+    return(NA)
+  }
+  total <- sum(sorted_lengths)
+  half_total <- total / 2
+  running <- 0
+  for (len in sorted_lengths) {
+    running <- running + len
+    if (running >= half_total) {
+      return(len)
+    }
+  }
+  NA
+}
+
+get_contig_lengths <- function(path) {
+  if (!file.exists(path)) {
+    return(numeric(0))
+  }
+  lines <- readLines(path, warn = FALSE)
+  lens <- numeric(0)
+  for (line in lines) {
+    if (!startsWith(line, ">")) {
+      next
+    }
+    match <- regexec("len=([0-9]+)", line)
+    parts <- regmatches(line, match)[[1]]
+    if (length(parts) >= 2) {
+      lens <- c(lens, as.numeric(parts[2]))
+    }
+  }
+  lens
+}
+
+escape_html_assembly <- function(x) {
+  if (is.null(x) || is.na(x)) {
+    return("NA")
+  }
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+assembly_rows <- list()
+sample_list <- character(0)
+species_lookup <- list()
+
+df_local <- NULL
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df_local <- read.csv(params$dataframe_csv, stringsAsFactors = FALSE)
+  if ("SAMPLE" %in% names(df_local)) {
+    df_local <- df_local[!duplicated(df_local$SAMPLE), ]
+    sample_list <- as.character(df_local$SAMPLE)
+  }
+}
+
+if (exists("sample_species") && length(sample_species) > 0) {
+  species_lookup <- sample_species
+}
+
+if (length(species_lookup) == 0 && !is.null(df_local) && "SPECIES" %in% names(df_local)) {
+  for (i in seq_len(nrow(df_local))) {
+    code <- df_local$SPECIES[i]
+    name <- if (exists("species_map") && !is.null(species_map[[code]])) {
+      species_map[[code]]
+    } else {
+      code
+    }
+    species_lookup[[df_local$SAMPLE[i]]] <- name
+  }
+}
+
+if (length(sample_list) == 0 && exists("samples")) {
+  sample_list <- samples
+}
+
+base_output <- if (!is.null(params$output_dir) && params$output_dir != "") {
+  params$output_dir
+} else {
+  getwd()
+}
+
+for (sample in sample_list) {
+  contigs_file <- file.path(base_output, "results", sample, "shovill", "contigs.fa")
+  lens <- get_contig_lengths(contigs_file)
+  if (length(lens) == 0) {
+    next
+  }
+  sorted_lens <- sort(lens, decreasing = TRUE)
+  n50_value <- calc_n50(sorted_lens)
+  genome_length <- sum(lens)
+  species_name <- if (!is.null(species_lookup[[sample]])) {
+    species_lookup[[sample]]
+  } else {
+    "Unknown"
+  }
+  assembly_rows[[length(assembly_rows) + 1]] <- data.frame(
+    Sample = sample,
+    Contigs = length(lens),
+    Species = species_name,
+    GenomeLength = genome_length,
+    N50 = n50_value,
+    stringsAsFactors = FALSE
+  )
+}
+
+assembly_df <- NULL
+if (length(assembly_rows) > 0) {
+  assembly_df <- do.call(rbind, assembly_rows)
+  species_levels <- sort(unique(assembly_df$Species))
+  assembly_df$Species <- factor(assembly_df$Species, levels = species_levels)
+}
+```
+
+```{r assembly_qc_table, results='asis'}
+if (is.null(assembly_df) || nrow(assembly_df) == 0) {
+  cat("No contig files found for assembly QC.\n")
+} else {
+  table_rows <- vapply(seq_len(nrow(assembly_df)), function(i) {
+    paste0(
+      "<tr>",
+      "<td>", escape_html_assembly(assembly_df$Sample[i]), "</td>",
+      "<td class=\"num-cell\">", escape_html_assembly(format(assembly_df$Contigs[i], big.mark = ",", scientific = FALSE)), "</td>",
+      "<td class=\"num-cell\">", escape_html_assembly(format(assembly_df$GenomeLength[i], big.mark = ",", scientific = FALSE)), "</td>",
+      "<td class=\"num-cell\">", escape_html_assembly(format(assembly_df$N50[i], big.mark = ",", scientific = FALSE)), "</td>",
+      "</tr>"
+    )
+  }, character(1))
+
+  table_html <- paste0(
+    "<table class=\"assembly-table\">",
+    "<thead><tr>",
+    "<th>Sample</th>",
+    "<th>Contigs</th>",
+    "<th>Total length (bp)</th>",
+    "<th>N50 (bp)</th>",
+    "</tr></thead>",
+    "<tbody>", paste(table_rows, collapse = ""), "</tbody>",
+    "</table>"
+  )
+  cat(table_html)
+}
+```
+
+```{r assembly_qc_plots, fig.width=9, fig.height=5, fig.align='center'}
+if (!is.null(assembly_df) && nrow(assembly_df) > 0) {
+  p_genome <- ggplot(assembly_df, aes(x = Species, y = GenomeLength)) +
+    geom_boxplot(
+      aes(fill = Species),
+      width = 0.45,
+      outlier.shape = NA,
+      alpha = 0.55
+    ) +
+    geom_jitter(
+      width = 0.12,
+      size = 1.6,
+      alpha = 0.7,
+      color = "#1f2937"
+    ) +
+    scale_y_continuous(labels = function(x) format(x, big.mark = ",", scientific = FALSE)) +
+    labs(x = NULL, y = "Genome length (bp)") +
+    theme_minimal(base_family = "sans") +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(angle = 30, hjust = 1, face = "bold.italic"),
+      panel.grid.minor = element_blank()
+    )
+
+  p_n50 <- ggplot(assembly_df, aes(x = Species, y = N50)) +
+    geom_boxplot(
+      aes(fill = Species),
+      width = 0.45,
+      outlier.shape = NA,
+      alpha = 0.55
+    ) +
+    geom_jitter(
+      width = 0.12,
+      size = 1.6,
+      alpha = 0.7,
+      color = "#1f2937"
+    ) +
+    scale_y_continuous(labels = function(x) format(x, big.mark = ",", scientific = FALSE)) +
+    labs(x = NULL, y = "N50 (bp)") +
+    theme_minimal(base_family = "sans") +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(angle = 30, hjust = 1, face = "bold.italic"),
+      panel.grid.minor = element_blank()
+    )
+
+  print(p_genome)
+  print(p_n50)
+}
+```
+
+# MLST
+
+```{r mlst_table, results='asis'}
+escape_html_mlst <- function(x) {
+  if (is.null(x) || is.na(x)) {
+    return("NA")
+  }
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+df_mlst <- NULL
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df_mlst <- read.csv(params$dataframe_csv, stringsAsFactors = FALSE, check.names = FALSE)
+}
+
+if (is.null(df_mlst) || !all(c("SAMPLE", "SUBTYPE", "SPECIES") %in% names(df_mlst))) {
+  cat("No MLST data found.\n")
+} else {
+  mlst_df <- df_mlst[, c("SAMPLE", "SUBTYPE", "SPECIES"), drop = FALSE]
+  mlst_df <- mlst_df[!is.na(mlst_df$SAMPLE) & mlst_df$SAMPLE != "", , drop = FALSE]
+  mlst_df <- mlst_df[!duplicated(mlst_df$SAMPLE), , drop = FALSE]
+  if (nrow(mlst_df) == 0) {
+    cat("No MLST data found.\n")
+  } else {
+    if (exists("species_map") && length(species_map) > 0) {
+      mlst_df$SPECIES_NAME <- vapply(mlst_df$SPECIES, function(code) {
+        if (!is.null(species_map[[code]])) {
+          species_map[[code]]
+        } else {
+          code
+        }
+      }, character(1))
+    } else {
+      mlst_df$SPECIES_NAME <- mlst_df$SPECIES
+    }
+    mlst_df$SUBTYPE <- ifelse(is.na(mlst_df$SUBTYPE) | mlst_df$SUBTYPE == "", "Unknown", mlst_df$SUBTYPE)
+    mlst_df <- mlst_df[order(mlst_df$SPECIES_NAME, mlst_df$SUBTYPE, mlst_df$SAMPLE), , drop = FALSE]
+
+    species_list <- unique(mlst_df$SPECIES_NAME)
+    row_html <- character(0)
+    for (sp in species_list) {
+      sp_rows <- mlst_df[mlst_df$SPECIES_NAME == sp, , drop = FALSE]
+      sp_rows <- sp_rows[order(sp_rows$SUBTYPE, sp_rows$SAMPLE), , drop = FALSE]
+      sp_rowspan <- nrow(sp_rows)
+      sp_first <- TRUE
+      subtypes <- unique(sp_rows$SUBTYPE)
+      for (st in subtypes) {
+        st_rows <- sp_rows[sp_rows$SUBTYPE == st, , drop = FALSE]
+        st_rows <- st_rows[order(st_rows$SAMPLE), , drop = FALSE]
+        st_rowspan <- nrow(st_rows)
+        st_first <- TRUE
+        for (i in seq_len(nrow(st_rows))) {
+          row <- "<tr>"
+          if (sp_first) {
+            row <- paste0(row, "<td class=\"species-cell\" rowspan=\"", sp_rowspan, "\">", escape_html_mlst(sp), "</td>")
+            sp_first <- FALSE
+          }
+          if (st_first) {
+            row <- paste0(row, "<td class=\"subtype-cell\" rowspan=\"", st_rowspan, "\">", escape_html_mlst(st), "</td>")
+            st_first <- FALSE
+          }
+          row <- paste0(
+            row,
+            "<td>", escape_html_mlst(st_rows$SAMPLE[i]), "</td>",
+            "</tr>"
+          )
+          row_html <- c(row_html, row)
+        }
+      }
+    }
+
+    table_html <- paste0(
+      "<table class=\"annotation-table mlst-table\">",
+      "<thead><tr>",
+      "<th>Species</th>",
+      "<th>Subtype</th>",
+      "<th>Sample</th>",
+      "</tr></thead>",
+      "<tbody>", paste(row_html, collapse = ""), "</tbody>",
+      "</table>"
+    )
+    cat(table_html)
+  }
+}
+```
+
+# Virulome
+
+```{r virulome_table, results='asis'}
+escape_html_table <- function(x) {
+  if (is.null(x) || is.na(x)) {
+    return("NA")
+  }
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+build_gene_table <- function(df_subset, table_class) {
+  if (is.null(df_subset) || nrow(df_subset) == 0) {
+    return("")
+  }
+  if (!("SAMPLE" %in% names(df_subset)) || !("GENE" %in% names(df_subset))) {
+    return("")
+  }
+  species_map_local <- list()
+  if (exists("species_map")) {
+    species_map_local <- species_map
+  }
+  if ("SPECIES" %in% names(df_subset)) {
+    df_subset$SPECIES_NAME <- vapply(df_subset$SPECIES, function(code) {
+      if (!is.null(species_map_local[[code]])) {
+        species_map_local[[code]]
+      } else {
+        code
+      }
+    }, character(1))
+  } else {
+    df_subset$SPECIES_NAME <- "Unknown"
+  }
+  identity_col <- NULL
+  if ("%IDENTITY" %in% names(df_subset)) {
+    identity_col <- "%IDENTITY"
+  } else if ("X.IDENTITY" %in% names(df_subset)) {
+    identity_col <- "X.IDENTITY"
+  } else {
+    matches <- grep("IDENTITY", names(df_subset), value = TRUE)
+    matches <- setdiff(matches, "IDENTITY")
+    if (length(matches) > 0) {
+      identity_col <- matches[1]
+    }
+  }
+  df_subset$IDENTITY <- if (!is.null(identity_col)) {
+    suppressWarnings(as.numeric(df_subset[[identity_col]]))
+  } else {
+    NA_real_
+  }
+
+  calc_alpha <- function(value) {
+    if (is.na(value)) {
+      return(0.25)
+    }
+    alpha <- value / 100
+    alpha <- max(0.2, min(0.85, alpha))
+    alpha
+  }
+
+  df_subset$SAMPLE <- as.character(df_subset$SAMPLE)
+  df_subset$GENE <- as.character(df_subset$GENE)
+  df_subset$SPECIES_NAME <- as.character(df_subset$SPECIES_NAME)
+
+  species_list <- sort(unique(df_subset$SPECIES_NAME))
+  body_rows <- character(0)
+
+  for (sp in species_list) {
+    sp_rows <- df_subset[df_subset$SPECIES_NAME == sp, , drop = FALSE]
+    samples_sp <- sort(unique(sp_rows$SAMPLE))
+    rowspan <- length(samples_sp)
+    for (idx in seq_along(samples_sp)) {
+      sample <- samples_sp[idx]
+      subset_rows <- sp_rows[sp_rows$SAMPLE == sample, , drop = FALSE]
+      subset_rows <- subset_rows[!is.na(subset_rows$GENE) & subset_rows$GENE != "", , drop = FALSE]
+      genes_html <- ""
+      if (nrow(subset_rows) > 0) {
+        gene_agg <- tryCatch(
+          aggregate(IDENTITY ~ GENE, data = subset_rows, FUN = max, na.rm = TRUE),
+          error = function(e) NULL
+        )
+        if (!is.null(gene_agg) && nrow(gene_agg) > 0) {
+          gene_agg <- gene_agg[order(gene_agg$GENE), , drop = FALSE]
+          gene_spans <- vapply(seq_len(nrow(gene_agg)), function(j) {
+            gene <- escape_html_table(gene_agg$GENE[j])
+            ident <- gene_agg$IDENTITY[j]
+            alpha <- calc_alpha(ident)
+            ident_text <- if (is.na(ident)) "NA" else sprintf("%.1f", ident)
+            paste0(
+              "<span class=\"gene-pill\" style=\"--pill-alpha:", sprintf("%.2f", alpha), "\" ",
+              "title=\"Identity: ", ident_text, "%\">",
+              gene,
+              "</span>"
+            )
+          }, character(1))
+          genes_html <- paste(gene_spans, collapse = " ")
+        }
+      }
+      if (genes_html == "") {
+        genes_html <- "<span class=\"muted\">None</span>"
+      }
+      row <- "<tr>"
+      if (idx == 1) {
+        row <- paste0(row, "<td class=\"species-cell\" rowspan=\"", rowspan, "\">", escape_html_table(sp), "</td>")
+      }
+      row <- paste0(
+        row,
+        "<td class=\"sample-cell\">", escape_html_table(sample), "</td>",
+        "<td class=\"genes-cell\">", genes_html, "</td>",
+        "</tr>"
+      )
+      body_rows <- c(body_rows, row)
+    }
+  }
+
+  paste0(
+    "<table class=\"", table_class, "\">",
+    "<thead><tr>",
+    "<th>Species</th>",
+    "<th>Sample</th>",
+    "<th>Genes</th>",
+    "</tr></thead>",
+    "<tbody>", paste(body_rows, collapse = ""), "</tbody>",
+    "</table>"
+  )
+}
+
+df_annotations <- NULL
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df_annotations <- read.csv(params$dataframe_csv, stringsAsFactors = FALSE, check.names = FALSE)
+}
+
+if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
+  cat("No virulence data found.\n")
+} else {
+  vir_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "VFDB", , drop = FALSE]
+  vir_df <- vir_df[, setdiff(names(vir_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
+  if (nrow(vir_df) == 0) {
+    cat("No virulence data found.\n")
+  } else {
+    vir_df <- vir_df[order(vir_df$SAMPLE), , drop = FALSE]
+    cat(build_gene_table(vir_df, "annotation-table vfdb-table"))
+  }
+}
+```
+
+# Resistome
+
+```{r resistome_table, results='asis'}
+if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
+  cat("No resistance data found.\n")
+} else {
+  res_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "NCBI", , drop = FALSE]
+  res_df <- res_df[, setdiff(names(res_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
+  if (nrow(res_df) == 0) {
+    cat("No resistance data found.\n")
+  } else {
+    res_df <- res_df[order(res_df$SAMPLE), , drop = FALSE]
+    cat(build_gene_table(res_df, "annotation-table resistome-table"))
+  }
+}
+```
+
+# Plasmidome
+
+```{r plasmid_table, results='asis'}
+if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
+  cat("No plasmid data found.\n")
+} else {
+  pla_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "PlasmidFinder", , drop = FALSE]
+  pla_df <- pla_df[, setdiff(names(pla_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
+  if (nrow(pla_df) == 0) {
+    cat("No plasmid data found.\n")
+  } else {
+    pla_df <- pla_df[order(pla_df$SAMPLE), , drop = FALSE]
+    cat(build_gene_table(pla_df, "annotation-table plasmid-table"))
+  }
+}
+```
+
+# Pangenome
+
+```{r pangenome_heatmap, fig.align='center', out.width='80%', results='asis'}
+suppressPackageStartupMessages(library(ggplot2))
+
+build_presence_matrix <- function(df, sample_names) {
+  if (is.null(df) || nrow(df) == 0 || !("Gene" %in% names(df))) {
+    return(NULL)
+  }
+  genes <- df$Gene
+  df <- df[, setdiff(names(df), "Gene"), drop = FALSE]
+  if (ncol(df) <= 13) {
+    return(NULL)
+  }
+  df <- df[, -(1:13), drop = FALSE]
+  if (length(sample_names) > 0) {
+    sample_cols <- intersect(names(df), sample_names)
+    if (length(sample_cols) > 0) {
+      df <- df[, sample_cols, drop = FALSE]
+    }
+  }
+  if (ncol(df) == 0) {
+    return(NULL)
+  }
+  mat <- as.matrix(df)
+  mat <- ifelse(is.na(mat) | mat == "" | mat == "0", 0, 1)
+  rownames(mat) <- genes
+  mat <- t(mat)
+  mat <- mat[rowSums(mat) > 0, , drop = FALSE]
+  if (nrow(mat) == 0 || ncol(mat) == 0) {
+    return(NULL)
+  }
+  mat <- mat[, order(colSums(mat), decreasing = TRUE), drop = FALSE]
+  mat
+}
+
+base_output <- if (!is.null(params$output_dir) && params$output_dir != "") {
+  params$output_dir
+} else {
+  getwd()
+}
+pangenome_dir <- file.path(base_output, "pangenome")
+
+if (!dir.exists(pangenome_dir)) {
+  cat("No pangenome data found.\n")
+} else {
+  species_dirs <- list.dirs(pangenome_dir, full.names = TRUE, recursive = FALSE)
+  if (length(species_dirs) == 0) {
+    cat("No pangenome data found.\n")
+  } else {
+    sample_names <- character(0)
+    if (exists("df") && !is.null(df) && "SAMPLE" %in% names(df)) {
+      sample_names <- unique(as.character(df$SAMPLE))
+    }
+    for (sp_dir in species_dirs) {
+      roary_csv <- file.path(sp_dir, "output", "gene_presence_absence.csv")
+      if (!file.exists(roary_csv)) {
+        next
+      }
+      df_pg <- read.csv(roary_csv, stringsAsFactors = FALSE, check.names = FALSE)
+      mat <- build_presence_matrix(df_pg, sample_names)
+      if (is.null(mat)) {
+        next
+      }
+      sp_code <- basename(sp_dir)
+      sp_name <- if (exists("species_map") && !is.null(species_map[[sp_code]])) {
+        species_map[[sp_code]]
+      } else {
+        sp_code
+      }
+
+      df_long <- as.data.frame(as.table(mat), stringsAsFactors = FALSE)
+      colnames(df_long) <- c("Sample", "Gene", "Presence")
+      df_long$Sample <- factor(df_long$Sample, levels = rownames(mat))
+      df_long$Gene <- factor(df_long$Gene, levels = colnames(mat))
+      df_long$SampleIndex <- as.numeric(df_long$Sample)
+      df_long$GeneIndex <- as.numeric(df_long$Gene)
+
+      cat(paste0("### Pangenome heatmap: ", sp_name, "\n\n"))
+      plot_width <- 20
+      plot_height <- plot_width * 0.05
+
+      gene_counts <- colSums(mat)
+      core_cutoff <- suppressWarnings(max(which(gene_counts == nrow(mat))))
+      if (!is.finite(core_cutoff)) {
+        core_cutoff <- 0
+      }
+
+      p <- ggplot(df_long, aes(x = GeneIndex, y = SampleIndex, fill = Presence)) +
+        geom_tile(color = NA) +
+        scale_x_continuous(expand = c(0, 0)) +
+        scale_y_continuous(
+          expand = c(0, 0),
+          limits = c(0, nrow(mat) + 0.5),
+          breaks = seq_along(rownames(mat)),
+          labels = rownames(mat)
+        ) +
+        scale_fill_gradient(low = "#ffffff", high = "#0b2a8a", limits = c(0, 1)) +
+        coord_cartesian(clip = "off") +
+        theme_void(base_family = "sans") +
+        theme(
+          legend.position = "none",
+          panel.grid = element_blank(),
+          axis.text.y = element_text(size = 6, hjust = 1, color = "#4b5563"),
+          axis.ticks.y = element_blank(),
+          plot.margin = margin(4, 4, 18, 60)
+        )
+
+      if (core_cutoff > 0 && core_cutoff < ncol(mat)) {
+        core_mid <- core_cutoff / 2
+        accessory_mid <- core_cutoff + (ncol(mat) - core_cutoff) / 2
+        p <- p +
+          geom_vline(xintercept = core_cutoff + 0.5, color = "#d1d5db", linewidth = 0.3) +
+          annotate("segment", x = 0.5, xend = core_cutoff + 0.5, y = 0.15, yend = 0.15, color = "#e5e7eb", linewidth = 0.4) +
+          annotate("segment", x = core_cutoff + 0.5, xend = ncol(mat) + 0.5, y = 0.15, yend = 0.15, color = "#e5e7eb", linewidth = 0.4) +
+          annotate("text", x = core_mid, y = 0.05, label = "Core genes", size = 3, color = "#4b5563") +
+          annotate("text", x = accessory_mid, y = 0.05, label = "Accessory genes", size = 3, color = "#4b5563")
+      }
+
+      plot_path <- file.path(tempdir(), paste0("pangenome_", sp_code, ".png"))
+      ggsave(plot_path, plot = p, width = plot_width, height = plot_height, units = "in", dpi = 200, bg = "white")
+      if (file.exists(plot_path)) {
+        img_uri <- knitr::image_uri(plot_path)
+        cat(sprintf(
+          '<div style="width:100%%;aspect-ratio:20/1;margin:0 auto;"><img src="%s" alt="Pangenome heatmap" style="width:100%%;height:100%%;display:block;object-fit:contain;background:#ffffff;" /></div>\n\n',
+          img_uri
+        ))
+      } else {
+        cat("Pangenome plot could not be rendered.\n")
+      }
+      cat("\n")
+    }
+  }
+}
+```

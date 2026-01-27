@@ -1,0 +1,15 @@
+name: pegas-report-r
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.3
+  - r-rmarkdown
+  - r-knitr
+  - r-gridextra
+  - r-jsonlite
+  - r-rvest
+  - r-xml2
+  - r-ggplot2
+  - pandoc
+# Add bioconductor-* packages and other report dependencies here.
