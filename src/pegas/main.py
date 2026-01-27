@@ -35,10 +35,12 @@ def build_parser():
     parser.add_argument("--gc", type=str,
                         default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json",
                         help="Custom JSON with GC content limits per species")
+    parser.add_argument("--interactive", action="store_true",
+                        help="Generate the interactive HTML report (optional)")
     parser.add_argument("--no-r-report", action="store_true",
-                        help="Disable the default R HTML report")
+                        help=argparse.SUPPRESS)
     parser.add_argument("--html-report", action="store_true",
-                        help="Generate the legacy HTML report (optional)")
+                        help=argparse.SUPPRESS)
     return parser
 
 def finalize_arguments(args):
@@ -55,6 +57,11 @@ def finalize_arguments(args):
         args.prokka_cpu_cores = default_chunk(args.cores)
     if args.roary_cpu_cores is None:
         args.roary_cpu_cores = args.cores
+
+    if not hasattr(args, "interactive"):
+        args.interactive = False
+    args.interactive = bool(args.interactive or getattr(args, "html_report", False))
+    args.simple_report = not bool(getattr(args, "no_r_report", False))
 
     return args
 
@@ -146,8 +153,10 @@ def write_run_config(output_dir, data_dir, args):
         "prokka_cpu_cores": args.prokka_cpu_cores,
         "roary_cpu_cores": args.roary_cpu_cores,
         "gc": os.path.abspath(os.path.expanduser(args.gc)) if args.gc else "",
-        "r_report": not args.no_r_report,
-        "html_report": bool(args.html_report),
+        "simple_report": bool(args.simple_report),
+        "interactive_report": bool(args.interactive),
+        "r_report": bool(args.simple_report),
+        "html_report": bool(args.interactive),
     }
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
@@ -254,8 +263,10 @@ def main():
         f"install_path='{path}'",
         f"output_dir='{output_dir}'",
         f"sample_manifest='{manifest_path}'",
-        f"r_report={not args.no_r_report}",
-        f"html_report={args.html_report}"
+        f"simple_report={args.simple_report}",
+        f"interactive_report={args.interactive}",
+        f"r_report={args.simple_report}",
+        f"html_report={args.interactive}"
     ]
 
     if args.shovill_cpu_cores:

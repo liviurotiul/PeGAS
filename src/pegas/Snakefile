@@ -22,18 +22,18 @@ prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
 gc_path = config.get("gc", "") or ""
-r_report = config.get("r_report", True)
-if isinstance(r_report, str):
-    r_report = r_report.lower() in ("1", "true", "yes", "y")
-html_report = config.get("html_report", False)
-if isinstance(html_report, str):
-    html_report = html_report.lower() in ("1", "true", "yes", "y")
+simple_report = config.get("simple_report", config.get("r_report", True))
+if isinstance(simple_report, str):
+    simple_report = simple_report.lower() in ("1", "true", "yes", "y")
+interactive_report = config.get("interactive_report", config.get("html_report", False))
+if isinstance(interactive_report, str):
+    interactive_report = interactive_report.lower() in ("1", "true", "yes", "y")
 
 html_path = f"{install_path}"
 rmd_template_path = os.path.join(install_path, "report_template.Rmd")
 r_render_script_path = os.path.join(install_path, "render_report.R")
-r_report_outputs = ["report/report_r.html"] if r_report else []
-html_report_outputs = ["report/report.html"] if html_report else []
+r_report_outputs = ["report/report_r.html"] if simple_report else []
+html_report_outputs = ["report/report.html"] if interactive_report else []
 
 try:
     import importlib.metadata as metadata
@@ -400,7 +400,7 @@ rule build_r_report:
         data_dir=raw_data_path,
         output_dir=work_directory,
         gc_path=gc_path,
-        report_html="report/report.html" if html_report else "",
+        report_html="report/report.html" if interactive_report else "",
         pegas_version=pegas_version,
         pegas_install_dir=install_path
     conda:

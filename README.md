@@ -7,7 +7,7 @@ This is PeGAS, a bioinformatic tool designed for seamless QC, assembly, and anno
 - **Quality Control:** FastQC-based QC for Illumina paired-end reads.
 - **Assembly:** De novo assembly using SPAdes (via Shovill).
 - **Annotation:** Abricate for gene profiling and Prokka for pangenome inputs.
-- **Reports:** Clean, static R HTML report by default, with an optional legacy interactive HTML report.
+- **Reports:** Clean, static R HTML report by default, with an optional interactive HTML report.
 - **GUI:** Launch a simple GUI to configure runs without remembering CLI flags.
 - **Parallel execution:** Multi-core execution across pipeline steps, with per-tool core controls.
 
@@ -31,23 +31,29 @@ If you **don't have conda yet installed**, we recommend Miniforge: https://conda
 
 ### 2. pegas vs pegas-lite
 
-- **pegas:** Full distribution. Recommended if you want everything installed in one environment.
-- **pegas-lite:** Lightweight distribution. Same CLI and GUI, but keeps the base environment small and creates per-tool conda envs on demand under `~/.pegas/envs`.
+- **pegas:** Full distribution that runs the Snakemake workflow. Requires `mamba`.
+- **pegas-lite:** Conda distribution that runs the workflow without Snakemake and does **not** require `mamba`.
 
-### 3. Installing pegas (full)
+### 3. Installing pegas (Snakemake)
+
+Install `mamba` once in your base conda environment:
+
+```bash
+(base)user@user:~$ conda install conda-forge::mamba
+```
 
 ```bash
 (base)user@user:~$ conda create -n pegas -c bioconda -c conda-forge pegas
 (base)user@user:~$ conda activate pegas
 ```
 
-### 4. Installing pegas-lite (lightweight)
+### 4. Installing pegas-lite (no Snakemake)
 
 ```bash
 (base)user@user:~$ conda create -n pegas-lite -c bioconda pegas-lite
 ```
 
-This creates a new environment called `pegas-lite` and installs the lightweight package from `bioconda`. Activate it with:
+This creates a new environment called `pegas-lite` and installs the package from `bioconda`. Activate it with:
 
 ```bash
 (base)user@user:~$ conda activate pegas-lite
@@ -69,7 +75,7 @@ usage: pegas [-h] -d DATA -o OUTPUT [-c CORES] [--overwrite]
              [--shovill-cpu-cores SHOVILL_CPU_CORES]
              [--prokka-cpu-cores PROKKA_CPU_CORES]
              [--roary-cpu-cores ROARY_CPU_CORES]
-             [--gc GC] [--no-r-report] [--html-report]
+             [--gc GC] [--interactive]
 
 Run the PeGAS pipeline.
 
@@ -88,8 +94,7 @@ options:
   --roary-cpu-cores ROARY_CPU_CORES
                         Number of CPU cores to use for Roary
   --gc GC               Custom JSON with GC content limits per species
-  --no-r-report         Disable the default R HTML report
-  --html-report         Generate the legacy HTML report (optional)
+  --interactive         Generate the interactive HTML report (optional)
 ```
 
 A model for the GC JSON file can be found here:
@@ -98,7 +103,7 @@ https://github.com/liviurotiul/PeGAS/blob/main/src/pegas/gc_content.json
 ### 6. Reports and GUI
 
 - **Default report:** `report/report_r.html` (clean, static, shareable)
-- **Legacy report (optional):** add `--html-report` to generate `report/report.html`
+- **Interactive report (optional):** add `--interactive` to generate `report/report.html`
 - **GUI:** run `pegas` or `pegas-lite` with no arguments to launch the GUI. The GUI mirrors the CLI flags.
 
 ### 7. Visualising the results

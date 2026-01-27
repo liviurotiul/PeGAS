@@ -27,8 +27,7 @@ def launch_gui(config_filename="pegas_config.json"):
     roary_var = tk.StringVar()
     gc_var = tk.StringVar(value=default_gc)
     overwrite_var = tk.BooleanVar(value=False)
-    html_report_var = tk.BooleanVar(value=False)
-    no_r_report_var = tk.BooleanVar(value=False)
+    interactive_report_var = tk.BooleanVar(value=False)
 
     def apply_config(config_data):
         if not isinstance(config_data, dict):
@@ -54,12 +53,11 @@ def launch_gui(config_filename="pegas_config.json"):
         overwrite = config_data.get("overwrite")
         if overwrite is not None:
             overwrite_var.set(bool(overwrite))
-        html_report = config_data.get("html_report")
-        if html_report is not None:
-            html_report_var.set(bool(html_report))
-        r_report = config_data.get("r_report")
-        if r_report is not None:
-            no_r_report_var.set(not bool(r_report))
+        interactive_report = config_data.get("interactive_report")
+        if interactive_report is None:
+            interactive_report = config_data.get("html_report")
+        if interactive_report is not None:
+            interactive_report_var.set(bool(interactive_report))
 
     def load_config_for_output(output_dir):
         output_dir = output_dir.strip()
@@ -155,10 +153,8 @@ def launch_gui(config_filename="pegas_config.json"):
             args_list += ["--gc", gc_path]
         if overwrite_var.get():
             args_list.append("--overwrite")
-        if html_report_var.get():
-            args_list.append("--html-report")
-        if no_r_report_var.get():
-            args_list.append("--no-r-report")
+        if interactive_report_var.get():
+            args_list.append("--interactive")
 
         result["args"] = args_list
         root.destroy()
@@ -205,10 +201,7 @@ def launch_gui(config_filename="pegas_config.json"):
     tk.Checkbutton(root, text="Overwrite output directory", variable=overwrite_var).grid(row=row, column=1, sticky="w", padx=8, pady=6)
     row += 1
 
-    tk.Checkbutton(root, text="Generate legacy HTML report", variable=html_report_var).grid(row=row, column=1, sticky="w", padx=8, pady=4)
-    row += 1
-
-    tk.Checkbutton(root, text="Disable R report (default on)", variable=no_r_report_var).grid(row=row, column=1, sticky="w", padx=8, pady=4)
+    tk.Checkbutton(root, text="Generate interactive HTML report", variable=interactive_report_var).grid(row=row, column=1, sticky="w", padx=8, pady=4)
     row += 1
 
     tk.Button(root, text="Run", command=on_run).grid(row=row, column=1, sticky="e", padx=8, pady=8)

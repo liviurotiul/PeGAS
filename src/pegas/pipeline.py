@@ -332,13 +332,13 @@ def run_report(html_path, data_dir, output_dir, gc_path, work_dir):
     build_report(html_path, data_dir, output_dir, gc_path)
 
 
-def run_r_report(data_dir, output_dir, gc_path, work_dir, html_report=False):
+def run_r_report(data_dir, output_dir, gc_path, work_dir, interactive_report=False):
     ensure_dir(os.path.join(work_dir, "report"))
     base_dir = os.path.dirname(os.path.realpath(__file__))
     rmd_template = os.path.join(base_dir, "report_template.Rmd")
     render_script = os.path.join(base_dir, "render_report.R")
     html_output = os.path.join(work_dir, "report", "report_r.html")
-    report_html = os.path.join(work_dir, "report", "report.html") if html_report else ""
+    report_html = os.path.join(work_dir, "report", "report.html") if interactive_report else ""
     dataframe_csv = os.path.join(work_dir, "dataframe", "results.csv")
     pegas_version = get_pegas_version()
 
@@ -406,10 +406,10 @@ def run_pipeline(args):
         os.chdir(work_dir)
         build_dataframe()
         run_roary(args.roary_cpu_cores, work_dir)
-        if args.html_report:
+        if args.interactive:
             run_report(html_path, data_dir, output_dir, gc_path, work_dir)
-        if not args.no_r_report:
-            run_r_report(data_dir, output_dir, gc_path, work_dir, html_report=args.html_report)
+        if args.simple_report:
+            run_r_report(data_dir, output_dir, gc_path, work_dir, interactive_report=args.interactive)
     finally:
         os.chdir(current_dir)
 
