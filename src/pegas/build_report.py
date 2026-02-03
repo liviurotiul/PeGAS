@@ -26,7 +26,7 @@ from .utils import (
 )
 
 
-def build_report(html_template_path, input_dir, output_dir, gc_path):
+def build_report(html_template_path, input_dir, output_dir):
     """
     Builds the report by generating visualizations and integrating them into the HTML template.
 
@@ -34,8 +34,6 @@ def build_report(html_template_path, input_dir, output_dir, gc_path):
     - html_template_path (str): Path to the directory containing the HTML template.
     - input_dir (str): Path to the input directory.
     - output_dir (str): Path to the output directory.
-    - gc_path (str): Path to the GC content JSON file.
-
     Returns:
     - report_html (str): The final report as an HTML string.
     """
@@ -126,10 +124,12 @@ def build_report(html_template_path, input_dir, output_dir, gc_path):
         qc_elements.append(contig_line_plot)
         figures.append(contig_line_plot)
 
-    # Read JSON file for GC content.
+    # Read JSON file for GC content (relative to install path).
     gc_content_dict = {}
-    with open(gc_path, 'r') as f:
-        gc_content_dict = json.load(f)
+    gc_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "gc_content.json")
+    if os.path.isfile(gc_path):
+        with open(gc_path, 'r') as f:
+            gc_content_dict = json.load(f)
 
     fastqc_table_html = create_fastqc_table(df, species_dict, gc_content_dict)
 

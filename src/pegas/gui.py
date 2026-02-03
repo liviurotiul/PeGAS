@@ -17,15 +17,12 @@ def launch_gui(config_filename="pegas_config.json"):
     root.title("PeGAS")
     root.resizable(False, False)
 
-    default_gc = os.path.join(os.path.dirname(os.path.realpath(__file__)), "gc_content.json")
-
     data_var = tk.StringVar()
     output_var = tk.StringVar()
     cores_var = tk.StringVar()
     shovill_var = tk.StringVar()
     prokka_var = tk.StringVar()
     roary_var = tk.StringVar()
-    gc_var = tk.StringVar(value=default_gc)
     overwrite_var = tk.BooleanVar(value=False)
     interactive_report_var = tk.BooleanVar(value=False)
 
@@ -47,9 +44,6 @@ def launch_gui(config_filename="pegas_config.json"):
         roary = config_data.get("roary_cpu_cores")
         if roary is not None:
             roary_var.set(str(roary))
-        gc_path = config_data.get("gc")
-        if gc_path:
-            gc_var.set(gc_path)
         overwrite = config_data.get("overwrite")
         if overwrite is not None:
             overwrite_var.set(bool(overwrite))
@@ -85,14 +79,6 @@ def launch_gui(config_filename="pegas_config.json"):
         if folder:
             output_var.set(folder)
             load_config_for_output(folder)
-
-    def browse_gc():
-        file_path = filedialog.askopenfilename(
-            title="Select GC content JSON",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-        if file_path:
-            gc_var.set(file_path)
 
     def parse_int(value, label):
         value = value.strip()
@@ -135,11 +121,6 @@ def launch_gui(config_filename="pegas_config.json"):
         if roary_val == "invalid":
             return
 
-        gc_path = gc_var.get().strip()
-        if gc_path and not os.path.isfile(gc_path):
-            messagebox.showerror("Invalid path", f"GC JSON file not found: {gc_path}")
-            return
-
         args_list = ["-d", data_dir, "-o", output_dir]
         if cores_val is not None:
             args_list += ["-c", str(cores_val)]
@@ -149,8 +130,6 @@ def launch_gui(config_filename="pegas_config.json"):
             args_list += ["--prokka-cpu-cores", str(prokka_val)]
         if roary_val is not None:
             args_list += ["--roary-cpu-cores", str(roary_val)]
-        if gc_path:
-            args_list += ["--gc", gc_path]
         if overwrite_var.get():
             args_list.append("--overwrite")
         if interactive_report_var.get():
@@ -191,11 +170,6 @@ def launch_gui(config_filename="pegas_config.json"):
 
     tk.Label(root, text="Roary cores (optional)").grid(row=row, column=0, sticky="w", padx=8, pady=4)
     tk.Entry(root, textvariable=roary_var, width=12).grid(row=row, column=1, sticky="w", padx=8, pady=4)
-    row += 1
-
-    tk.Label(root, text="GC content JSON (optional)").grid(row=row, column=0, sticky="w", padx=8, pady=4)
-    tk.Entry(root, textvariable=gc_var, width=50).grid(row=row, column=1, padx=8, pady=4)
-    tk.Button(root, text="Browse", command=browse_gc).grid(row=row, column=2, padx=8, pady=4)
     row += 1
 
     tk.Checkbutton(root, text="Overwrite output directory", variable=overwrite_var).grid(row=row, column=1, sticky="w", padx=8, pady=6)

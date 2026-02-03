@@ -38,10 +38,10 @@ except ImportError:
     )
 
 
-def parse_arguments(argv=None):
+def parse_arguments(argv=None, lite_mode=False):
     parser = build_parser()
     args = parser.parse_args(argv)
-    return finalize_arguments(args)
+    return finalize_arguments(args, lite_mode=lite_mode)
 
 ENV_DIR = os.path.join(os.path.expanduser("~"), ".pegas", "envs")
 ENV_SPECS = {
@@ -327,12 +327,12 @@ def run_roary(roary_cpus, work_dir):
                 subprocess.run(["mv", old_output, output_dir], cwd=work_dir)
 
 
-def run_report(html_path, data_dir, output_dir, gc_path, work_dir):
+def run_report(html_path, data_dir, output_dir, work_dir):
     ensure_dir(os.path.join(work_dir, "report"))
-    build_report(html_path, data_dir, output_dir, gc_path)
+    build_report(html_path, data_dir, output_dir)
 
 
-def run_r_report(data_dir, output_dir, gc_path, work_dir, interactive_report=False):
+def run_r_report(data_dir, output_dir, work_dir, interactive_report=False):
     ensure_dir(os.path.join(work_dir, "report"))
     base_dir = os.path.dirname(os.path.realpath(__file__))
     rmd_template = os.path.join(base_dir, "report_template.Rmd")
@@ -351,7 +351,6 @@ def run_r_report(data_dir, output_dir, gc_path, work_dir, interactive_report=Fal
         "--report_html", report_html,
         "--data_dir", data_dir,
         "--output_dir", output_dir,
-        "--gc_path", gc_path or "",
         "--pegas_version", pegas_version,
         "--pegas_install_dir", base_dir,
     ]
@@ -361,8 +360,6 @@ def run_r_report(data_dir, output_dir, gc_path, work_dir, interactive_report=Fal
 def run_pipeline(args):
     data_dir = os.path.abspath(os.path.expanduser(args.data))
     output_dir = os.path.abspath(os.path.expanduser(args.output))
-    gc_path = os.path.abspath(os.path.expanduser(args.gc)) if args.gc else ""
-
     ensure_conda_available()
 
     if not os.path.isdir(data_dir):
@@ -407,9 +404,9 @@ def run_pipeline(args):
         build_dataframe()
         run_roary(args.roary_cpu_cores, work_dir)
         if args.interactive:
-            run_report(html_path, data_dir, output_dir, gc_path, work_dir)
+            run_report(html_path, data_dir, output_dir, work_dir)
         if args.simple_report:
-            run_r_report(data_dir, output_dir, gc_path, work_dir, interactive_report=args.interactive)
+            run_r_report(data_dir, output_dir, work_dir, interactive_report=args.interactive)
     finally:
         os.chdir(current_dir)
 

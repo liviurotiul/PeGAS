@@ -244,7 +244,7 @@ img {
 }
 
 .vfdb-table {
-  --pill-color: 59, 130, 246;
+  --pill-color: 96, 165, 250;
 }
 
 .resistome-table {
@@ -274,6 +274,42 @@ img {
 .annotation-table .genes-cell {
   line-height: 1.6;
 }
+
+.table-search {
+  width: 100%;
+  margin: 4px 0 10px 0;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.collapsible-section > h1 {
+  cursor: pointer;
+  position: relative;
+  padding-right: 18px;
+  font-weight: 600;
+  margin: 6px 0;
+}
+
+.collapsible-section > h1::after {
+  content: "▸";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9em;
+  color: #6b7280;
+}
+
+.collapsible-section:not(.collapsed) > h1::after {
+  content: "▾";
+}
+
+.collapsible-section.collapsed > :not(h1) {
+  display: none;
+}
+
 
 .mlst-table .species-cell {
   width: 10%;
@@ -315,5 +351,11 @@ img {
     max-width: none;
     padding-left: 20mm;
     padding-right: 20mm;
+  }
+  .collapsible-section.collapsed > :not(h1) {
+    display: block;
+  }
+  .collapsible-section > h1::after {
+    content: "";
   }
 }

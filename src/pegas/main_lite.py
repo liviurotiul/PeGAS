@@ -21,9 +21,9 @@ def main(argv=None):
         if not gui_args:
             tqdm.write("[pegas] No arguments provided. Exiting.")
             return
-        args = parse_arguments(gui_args)
+        args = parse_arguments(gui_args, lite_mode=True)
     else:
-        args = parse_arguments(argv)
+        args = parse_arguments(argv, lite_mode=True)
     run_pipeline(args)
 
 

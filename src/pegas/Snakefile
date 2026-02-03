@@ -21,7 +21,6 @@ shovill_cpus = config.get("shovill_cpu_cores", 1)
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
-gc_path = config.get("gc", "") or ""
 simple_report = config.get("simple_report", config.get("r_report", True))
 if isinstance(simple_report, str):
     simple_report = simple_report.lower() in ("1", "true", "yes", "y")
@@ -387,7 +386,7 @@ rule build_report:
     output:
         report="report/report.html"
     run:
-        build_report(html_path, raw_data_path, work_directory, gc_path)
+        build_report(html_path, raw_data_path, work_directory)
 
 rule build_r_report:
     input:
@@ -399,7 +398,6 @@ rule build_r_report:
     params:
         data_dir=raw_data_path,
         output_dir=work_directory,
-        gc_path=gc_path,
         report_html="report/report.html" if interactive_report else "",
         pegas_version=pegas_version,
         pegas_install_dir=install_path
@@ -414,7 +412,6 @@ rule build_r_report:
             --report_html "{params.report_html}" \
             --data_dir "{params.data_dir}" \
             --output_dir "{params.output_dir}" \
-            --gc_path "{params.gc_path}" \
             --pegas_version "{params.pegas_version}" \
             --pegas_install_dir "{params.pegas_install_dir}"
         """

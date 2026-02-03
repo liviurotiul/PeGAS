@@ -75,6 +75,7 @@ species_dict = {
     "mhaemolytica": "Mannheimia haemolytica",
     "szooepidemicus": "Streptococcus zooepidemicus",
     "orhinotracheale": "Ornithorhynchus anatinus",
+    "salmonella": "Salmonella enterica",
     "senterica_achtman_2": "Salmonella enterica",
     "llactis_phage": "Lactococcus lactis phage",
     "magalactiae": "Mycoplasma gallisepticum",

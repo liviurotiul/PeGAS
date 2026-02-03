@@ -43,7 +43,6 @@ render_params <- list(
   report_html = opts[["report_html"]],
   data_dir = opts[["data_dir"]],
   output_dir = opts[["output_dir"]],
-  gc_path = opts[["gc_path"]],
   pegas_version = opts[["pegas_version"]],
   pegas_install_dir = opts[["pegas_install_dir"]]
 )

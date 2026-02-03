@@ -32,9 +32,6 @@ def build_parser():
     parser.add_argument("--shovill-cpu-cores", type=int)
     parser.add_argument("--prokka-cpu-cores", type=int)
     parser.add_argument("--roary-cpu-cores",  type=int)
-    parser.add_argument("--gc", type=str,
-                        default=f"{os.path.dirname(os.path.realpath(__file__))}/gc_content.json",
-                        help="Custom JSON with GC content limits per species")
     parser.add_argument("--interactive", action="store_true",
                         help="Generate the interactive HTML report (optional)")
     parser.add_argument("--no-r-report", action="store_true",
@@ -43,7 +40,7 @@ def build_parser():
                         help=argparse.SUPPRESS)
     return parser
 
-def finalize_arguments(args):
+def finalize_arguments(args, lite_mode=False):
     total = mp.cpu_count()
     args.cores = args.cores or total
 
@@ -51,12 +48,20 @@ def finalize_arguments(args):
     def default_chunk(n):
         return min(CAP, max(1, n // 4))
 
-    if args.shovill_cpu_cores is None:
-        args.shovill_cpu_cores = default_chunk(args.cores)
-    if args.prokka_cpu_cores is None:
-        args.prokka_cpu_cores = default_chunk(args.cores)
-    if args.roary_cpu_cores is None:
-        args.roary_cpu_cores = args.cores
+    if lite_mode:
+        if args.shovill_cpu_cores is None:
+            args.shovill_cpu_cores = min(CAP, args.cores)
+        if args.prokka_cpu_cores is None:
+            args.prokka_cpu_cores = args.cores
+        if args.roary_cpu_cores is None:
+            args.roary_cpu_cores = args.cores
+    else:
+        if args.shovill_cpu_cores is None:
+            args.shovill_cpu_cores = default_chunk(args.cores)
+        if args.prokka_cpu_cores is None:
+            args.prokka_cpu_cores = default_chunk(args.cores)
+        if args.roary_cpu_cores is None:
+            args.roary_cpu_cores = args.cores
 
     if not hasattr(args, "interactive"):
         args.interactive = False
@@ -69,7 +74,7 @@ def parse_arguments(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    return finalize_arguments(args)
+    return finalize_arguments(args, lite_mode=False)
 
 # ---- Utility functions ----.
 def list_fastq_files(path):
@@ -152,7 +157,6 @@ def write_run_config(output_dir, data_dir, args):
         "shovill_cpu_cores": args.shovill_cpu_cores,
         "prokka_cpu_cores": args.prokka_cpu_cores,
         "roary_cpu_cores": args.roary_cpu_cores,
-        "gc": os.path.abspath(os.path.expanduser(args.gc)) if args.gc else "",
         "simple_report": bool(args.simple_report),
         "interactive_report": bool(args.interactive),
         "r_report": bool(args.simple_report),
@@ -275,8 +279,6 @@ def main():
         config_params.append(f"prokka_cpu_cores={args.prokka_cpu_cores}")
     if args.roary_cpu_cores:
         config_params.append(f"roary_cpu_cores={args.roary_cpu_cores}")
-    if args.gc:
-        config_params.append(f"gc='{args.gc}'")
 
     # Build the Snakemake command.
     command = [
