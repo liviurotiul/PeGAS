@@ -153,6 +153,22 @@ def run_command(cmd, cwd, env_name=None, stdout=None):
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, cmd)
 
+def purge_empty_spades(output_dir):
+    results_dir = os.path.join(output_dir, "results")
+    if not os.path.isdir(results_dir):
+        return
+    for sample in os.listdir(results_dir):
+        sample_dir = os.path.join(results_dir, sample)
+        if not os.path.isdir(sample_dir):
+            continue
+        spades_path = os.path.join(sample_dir, "shovill", "spades.fasta")
+        if os.path.isfile(spades_path) and os.path.getsize(spades_path) == 0:
+            try:
+                shutil.rmtree(sample_dir)
+                tqdm.write(f"[pegas] Removed empty Shovill output for {sample} (empty spades.fasta).")
+            except Exception as exc:
+                tqdm.write(f"[pegas] Warning: failed to remove {sample_dir}: {exc}")
+
 
 def run_fastqc(fastq_files, work_dir):
     fastqc_dir = os.path.join(work_dir, "fastqc")
@@ -167,12 +183,12 @@ def run_fastqc(fastq_files, work_dir):
         run_command(["fastqc", fastq, "-o", fastqc_dir], cwd=work_dir, env_name="fastqc")
 
 
-def run_shovill(sample_pairs, shovill_cpus, work_dir):
+def run_shovill(sample_pairs, shovill_cpus, shovill_ram, work_dir):
     for sample, reads in tqdm(sample_pairs.items(), desc="Shovill"):
         outdir = os.path.join(work_dir, "results", sample, "shovill")
         ensure_dir(outdir)
         assembly = os.path.join(outdir, "contigs.fa")
-        gfa = os.path.join(outdir, "spades.gfa")
+        gfa = os.path.join(outdir, "contigs.gfa")
         corrections = os.path.join(outdir, "shovill.corrections")
         spades = os.path.join(outdir, "spades.fasta")
         log_path = os.path.join(outdir, "shovill.log")
@@ -189,6 +205,8 @@ def run_shovill(sample_pairs, shovill_cpus, work_dir):
             "--force",
             "--cpus", str(shovill_cpus),
         ]
+        if shovill_ram:
+            cmd.extend(["--ram", str(shovill_ram)])
 
         try:
             run_command(cmd, cwd=work_dir, env_name="shovill")
@@ -362,6 +380,13 @@ def run_pipeline(args):
     output_dir = os.path.abspath(os.path.expanduser(args.output))
     ensure_conda_available()
 
+    if getattr(args, "lite_mode", False):
+        opts = vars(args)
+        ordered_keys = sorted(opts.keys())
+        tqdm.write("[pegas] pegas-lite options:")
+        for key in ordered_keys:
+            tqdm.write(f"[pegas]   {key}={opts[key]}")
+
     if not os.path.isdir(data_dir):
         tqdm.write(f"[pegas] Input directory not found: {data_dir}")
         sys.exit(1)
@@ -381,6 +406,9 @@ def run_pipeline(args):
         sys.exit(1)
     ensure_dir(output_dir)
 
+    if getattr(args, "lite_mode", False):
+        purge_empty_spades(output_dir)
+
     remove_extra_files(output_dir, "raw_data", fastq_files)
     write_run_config(output_dir, data_dir, args)
     write_sample_manifest(output_dir, fastq_files, sample_pairs)
@@ -389,7 +417,7 @@ def run_pipeline(args):
     html_path = os.path.dirname(os.path.realpath(__file__))
 
     run_fastqc(fastq_files, work_dir)
-    run_shovill(sample_pairs, args.shovill_cpu_cores, work_dir)
+    run_shovill(sample_pairs, args.shovill_cpu_cores, args.shovill_ram, work_dir)
     sample_names = sorted(sample_pairs.keys())
     run_abricate(sample_names, work_dir, "ncbi")
     run_abricate(sample_names, work_dir, "plasmidfinder")

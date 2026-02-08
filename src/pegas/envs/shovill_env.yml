@@ -5,3 +5,5 @@ channels:
   - conda-forge
 dependencies:
   - shovill
+  - megahit=1.1.2
+  - gsl=2.5

@@ -16,7 +16,9 @@ except ImportError:
 
 
 def main(argv=None):
-    if argv is None or len(argv) == 0:
+    if argv is None:
+        argv = sys.argv[1:]
+    if len(argv) == 0:
         gui_args = launch_gui(CONFIG_FILENAME)
         if not gui_args:
             tqdm.write("[pegas] No arguments provided. Exiting.")

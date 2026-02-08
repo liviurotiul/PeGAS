@@ -31,8 +31,8 @@ If you **don't have conda yet installed**, we recommend Miniforge: https://conda
 
 ### 2. pegas vs pegas-lite
 
-- **pegas:** Full distribution that runs the Snakemake workflow. Requires `mamba`.
-- **pegas-lite:** Conda distribution that runs the workflow without Snakemake and does **not** require `mamba`.
+- **pegas:** Best for **many samples** and **high-throughput** runs, with **more RAM** and **disk space** available. Uses **Snakemake** (requires `mamba`).
+- **pegas-lite:** Best for **fewer samples** and **limited RAM/disk space**. **No Snakemake** (no `mamba` required).
 
 ### 3. Installing pegas (Snakemake)
 

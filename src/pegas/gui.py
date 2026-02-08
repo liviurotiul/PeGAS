@@ -21,6 +21,7 @@ def launch_gui(config_filename="pegas_config.json"):
     output_var = tk.StringVar()
     cores_var = tk.StringVar()
     shovill_var = tk.StringVar()
+    shovill_ram_var = tk.StringVar()
     prokka_var = tk.StringVar()
     roary_var = tk.StringVar()
     overwrite_var = tk.BooleanVar(value=False)
@@ -38,6 +39,9 @@ def launch_gui(config_filename="pegas_config.json"):
         shovill = config_data.get("shovill_cpu_cores")
         if shovill is not None:
             shovill_var.set(str(shovill))
+        shovill_ram = config_data.get("shovill_ram")
+        if shovill_ram is not None:
+            shovill_ram_var.set(str(shovill_ram))
         prokka = config_data.get("prokka_cpu_cores")
         if prokka is not None:
             prokka_var.set(str(prokka))
@@ -114,6 +118,9 @@ def launch_gui(config_filename="pegas_config.json"):
         shovill_val = parse_int(shovill_var.get(), "Shovill cores")
         if shovill_val == "invalid":
             return
+        shovill_ram_val = parse_int(shovill_ram_var.get(), "Shovill RAM (GB)")
+        if shovill_ram_val == "invalid":
+            return
         prokka_val = parse_int(prokka_var.get(), "Prokka cores")
         if prokka_val == "invalid":
             return
@@ -126,6 +133,8 @@ def launch_gui(config_filename="pegas_config.json"):
             args_list += ["-c", str(cores_val)]
         if shovill_val is not None:
             args_list += ["--shovill-cpu-cores", str(shovill_val)]
+        if shovill_ram_val is not None:
+            args_list += ["--shovill-ram", str(shovill_ram_val)]
         if prokka_val is not None:
             args_list += ["--prokka-cpu-cores", str(prokka_val)]
         if roary_val is not None:
@@ -162,6 +171,10 @@ def launch_gui(config_filename="pegas_config.json"):
 
     tk.Label(root, text="Shovill cores (optional)").grid(row=row, column=0, sticky="w", padx=8, pady=4)
     tk.Entry(root, textvariable=shovill_var, width=12).grid(row=row, column=1, sticky="w", padx=8, pady=4)
+    row += 1
+
+    tk.Label(root, text="Shovill RAM (GB, optional)").grid(row=row, column=0, sticky="w", padx=8, pady=4)
+    tk.Entry(root, textvariable=shovill_ram_var, width=12).grid(row=row, column=1, sticky="w", padx=8, pady=4)
     row += 1
 
     tk.Label(root, text="Prokka cores (optional)").grid(row=row, column=0, sticky="w", padx=8, pady=4)

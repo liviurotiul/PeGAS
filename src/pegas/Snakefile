@@ -18,6 +18,8 @@ sample_manifest_path = config.get("sample_manifest", None)
 list_of_samples = config.get("samples", None)
 install_path = config.get("install_path", None) or os.path.dirname(os.path.realpath(__file__))
 shovill_cpus = config.get("shovill_cpu_cores", 1)
+shovill_ram = config.get("shovill_ram", None)
+shovill_ram_flag = f"--ram {shovill_ram}" if shovill_ram else ""
 prokka_cpus = config.get("prokka_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
@@ -175,12 +177,14 @@ rule shovill:
         R2=lambda wildcards: sample_pairs[wildcards.sample]["R2"]
     output:
         assembly="results/{sample}/shovill/contigs.fa",
-        gfa="results/{sample}/shovill/spades.gfa",
+        gfa="results/{sample}/shovill/contigs.gfa",
         corrections="results/{sample}/shovill/shovill.corrections",
         log="results/{sample}/shovill/shovill.log",
         spades="results/{sample}/shovill/spades.fasta"
     threads:
         shovill_cpus
+    resources:
+        mem_gb=shovill_ram if shovill_ram else 0
     conda:
         "envs/shovill_env.yml"
     shell:
@@ -189,7 +193,7 @@ rule shovill:
         if ! shovill --trim \
                 --outdir results/{wildcards.sample}/shovill \
                 --R1 {input.R1} --R2 {input.R2} \
-                --force --cpus {threads} ; then
+                --force --cpus {threads} {shovill_ram_flag} ; then
             echo -e "\n[ERROR] Shovill failed for sample {wildcards.sample}. Creating empty output files. Check {output.log} for details." >&2
             mkdir -p results/{wildcards.sample}/shovill
             # Create empty output files to prevent pipeline failure

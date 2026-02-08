@@ -30,6 +30,7 @@ def build_parser():
     parser.add_argument("-c", "--cores", type=int, help="Total cores to use (default: all)")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite output dir if it exists")
     parser.add_argument("--shovill-cpu-cores", type=int)
+    parser.add_argument("--shovill-ram", type=int, help="RAM (GB) to allocate to Shovill")
     parser.add_argument("--prokka-cpu-cores", type=int)
     parser.add_argument("--roary-cpu-cores",  type=int)
     parser.add_argument("--interactive", action="store_true",
@@ -40,6 +41,16 @@ def build_parser():
                         help=argparse.SUPPRESS)
     return parser
 
+def get_total_ram_gb():
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        if pages and page_size:
+            return max(1, int(pages * page_size / (1024 ** 3)))
+    except Exception:
+        return None
+    return None
+
 def finalize_arguments(args, lite_mode=False):
     total = mp.cpu_count()
     args.cores = args.cores or total
@@ -49,13 +60,35 @@ def finalize_arguments(args, lite_mode=False):
         return min(CAP, max(1, n // 4))
 
     if lite_mode:
-        if args.shovill_cpu_cores is None:
+        ram_gb = args.shovill_ram
+        if ram_gb is None:
+            ram_gb = get_total_ram_gb()
+        if ram_gb is not None and ram_gb <= 0:
+            ram_gb = None
+        if ram_gb is not None:
+            half_ram = max(1, ram_gb // 2)
+            tsingle = min(args.cores, CAP, half_ram)
+            rsingle = min(ram_gb, max(16, 2 * tsingle))
+            args.shovill_cpu_cores = tsingle
+            args.shovill_ram = rsingle
+        elif args.shovill_cpu_cores is None:
             args.shovill_cpu_cores = min(CAP, args.cores)
         if args.prokka_cpu_cores is None:
             args.prokka_cpu_cores = args.cores
         if args.roary_cpu_cores is None:
             args.roary_cpu_cores = args.cores
     else:
+        if args.shovill_cpu_cores is None and args.shovill_ram is None:
+            ram_gb = get_total_ram_gb()
+            if ram_gb is not None and ram_gb > 0:
+                rjob = min(16, max(1, ram_gb // 2))
+                j_parallel = max(1, ram_gb // rjob)
+                base_threads = max(1, args.cores // j_parallel)
+                tjob = max(2, min(8, base_threads))
+                if tjob > args.cores:
+                    tjob = args.cores
+                args.shovill_cpu_cores = tjob
+                args.shovill_ram = rjob
         if args.shovill_cpu_cores is None:
             args.shovill_cpu_cores = default_chunk(args.cores)
         if args.prokka_cpu_cores is None:
@@ -67,6 +100,7 @@ def finalize_arguments(args, lite_mode=False):
         args.interactive = False
     args.interactive = bool(args.interactive or getattr(args, "html_report", False))
     args.simple_report = not bool(getattr(args, "no_r_report", False))
+    args.lite_mode = lite_mode
 
     return args
 
@@ -155,6 +189,7 @@ def write_run_config(output_dir, data_dir, args):
         "cores": args.cores,
         "overwrite": bool(args.overwrite),
         "shovill_cpu_cores": args.shovill_cpu_cores,
+        "shovill_ram": args.shovill_ram,
         "prokka_cpu_cores": args.prokka_cpu_cores,
         "roary_cpu_cores": args.roary_cpu_cores,
         "simple_report": bool(args.simple_report),
@@ -275,6 +310,8 @@ def main():
 
     if args.shovill_cpu_cores:
         config_params.append(f"shovill_cpu_cores={args.shovill_cpu_cores}")
+    if args.shovill_ram:
+        config_params.append(f"shovill_ram={args.shovill_ram}")
     if args.prokka_cpu_cores:
         config_params.append(f"prokka_cpu_cores={args.prokka_cpu_cores}")
     if args.roary_cpu_cores:
@@ -302,6 +339,10 @@ def main():
     # Add the --config option and configuration parameters.
     command.append("--config")
     command.extend(config_params)
+
+    total_ram_gb = get_total_ram_gb()
+    if total_ram_gb is not None and total_ram_gb > 0:
+        command.extend(["--resources", f"mem_gb={total_ram_gb}"])
 
     unlock_command.append("--config")
     unlock_command.extend(config_params)
