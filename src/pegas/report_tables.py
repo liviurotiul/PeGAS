@@ -109,7 +109,15 @@ def create_fastqc_table(df, species_dict, gc_content_dict):
     # Function to extract sample name.
     def get_core_sample_name(filename):
         """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-        return os.path.basename(filename).replace("_R1", "").replace("_R2", "").replace(".fastq.gz", "").replace("_fastqc.html", "")
+        base = os.path.basename(filename)
+        base = base.replace("_fastqc.html", "").replace(".html", "")
+        matches = list(re.finditer(r"R([12])(?=$|[._-])", base, flags=re.IGNORECASE))
+        if matches:
+            sample = base[:matches[-1].start()].rstrip("._-")
+            if sample:
+                return sample
+        base = re.sub(r"\.(fastq|fq)(\.gz)?$", "", base, flags=re.IGNORECASE)
+        return base.rstrip("._-")
 
     # Function to extract read direction from file path.
     def get_read_direction_from_file(file_path):

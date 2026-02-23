@@ -16,6 +16,15 @@ warnings.filterwarnings("ignore")
 CAP = 16
 READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
 CONFIG_FILENAME = "pegas_config.json"
+TOOL_VERSION_PACKAGES = {
+    "fastqc": ["fastqc"],
+    "shovill": ["shovill"],
+    "abricate": ["abricate"],
+    "mlst": ["mlst"],
+    "prokka": ["prokka"],
+    "roary": ["roary"],
+    "rscript": ["r-base"],
+}
 
 try:
     from .gui import launch_gui
@@ -180,7 +189,59 @@ def write_sample_manifest(base_folder, fastq_files, sample_pairs):
         json.dump(manifest, f)
     return manifest_path
 
-def write_run_config(output_dir, data_dir, args):
+def _iter_conda_env_paths(prefixes):
+    env_paths = []
+    for prefix in prefixes:
+        if not prefix or not os.path.isdir(prefix):
+            continue
+        for entry in os.listdir(prefix):
+            env_path = os.path.join(prefix, entry)
+            if os.path.isdir(env_path) and os.path.isdir(os.path.join(env_path, "conda-meta")):
+                env_paths.append(env_path)
+    return env_paths
+
+
+def _conda_list_packages(env_path):
+    try:
+        result = subprocess.run(
+            ["conda", "list", "-p", env_path, "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except Exception:
+        return None
+    return {pkg.get("name"): pkg.get("version") for pkg in data if isinstance(pkg, dict)}
+
+
+def collect_tool_versions(conda_prefixes):
+    versions = {tool: "unknown" for tool in TOOL_VERSION_PACKAGES}
+    if shutil.which("conda") is None:
+        return versions
+    package_versions = {}
+    for env_path in _iter_conda_env_paths(conda_prefixes):
+        env_packages = _conda_list_packages(env_path)
+        if not env_packages:
+            continue
+        for name, version in env_packages.items():
+            if name and name not in package_versions:
+                package_versions[name] = version
+    for tool, package_names in TOOL_VERSION_PACKAGES.items():
+        for package_name in package_names:
+            version = package_versions.get(package_name)
+            if version:
+                versions[tool] = version
+                break
+    return versions
+
+
+def write_run_config(output_dir, data_dir, args, tool_versions=None):
     """Writes the run configuration to a JSON file in the output directory."""
     config_path = os.path.join(output_dir, CONFIG_FILENAME)
     config = {
@@ -197,6 +258,8 @@ def write_run_config(output_dir, data_dir, args):
         "r_report": bool(args.simple_report),
         "html_report": bool(args.interactive),
     }
+    if tool_versions is not None:
+        config["tool_versions"] = tool_versions
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
     return config_path
@@ -358,6 +421,8 @@ def main():
         sys.exit(result.returncode)
     else:
         tqdm.write("PeGAS pipeline completed successfully.")
+        tool_versions = collect_tool_versions([os.path.join(output_dir, ".snakemake", "conda")])
+        write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
 
 if __name__ == "__main__":
     main()

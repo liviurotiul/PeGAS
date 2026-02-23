@@ -19,6 +19,7 @@ try:
         build_fastq_pairs,
         write_sample_manifest,
         write_run_config,
+        collect_tool_versions,
         remove_extra_files,
     )
 except ImportError:
@@ -34,6 +35,7 @@ except ImportError:
         build_fastq_pairs,
         write_sample_manifest,
         write_run_config,
+        collect_tool_versions,
         remove_extra_files,
     )
 
@@ -437,6 +439,9 @@ def run_pipeline(args):
             run_r_report(data_dir, output_dir, work_dir, interactive_report=args.interactive)
     finally:
         os.chdir(current_dir)
+
+    tool_versions = collect_tool_versions([ENV_DIR])
+    write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
 
 
 def main(argv=None):

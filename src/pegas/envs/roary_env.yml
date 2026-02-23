@@ -1,6 +1,7 @@
 name: roary_env
 channels:
   - conda-forge
+  - bioconda
 dependencies:
   - roary=3.13.0
   - pandas

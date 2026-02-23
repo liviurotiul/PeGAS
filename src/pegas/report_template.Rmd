@@ -337,12 +337,21 @@ strip_suffix <- function(value, suffix) {
 
 get_core_sample_name <- function(filename) {
   base <- trimws(basename(filename))
-  base <- sub("_R[12](?=$|[._-])", "", base, perl = TRUE, ignore.case = TRUE)
+  matches <- gregexpr("R([12])(?=$|[._-])", base, perl = TRUE, ignore.case = TRUE)
+  positions <- matches[[1]]
+  if (length(positions) > 0 && positions[1] != -1) {
+    last_pos <- tail(positions, 1)
+    sample <- substr(base, 1, last_pos - 1)
+    sample <- sub("[._-]+$", "", sample)
+    if (nchar(sample) > 0) {
+      return(sample)
+    }
+  }
   base <- sub("\\\\.(fastq|fq)(\\\\.gz)?$", "", base, ignore.case = TRUE)
   base <- strip_suffix(base, "_fastqc.html")
   base <- strip_suffix(base, ".html")
   base <- strip_suffix(base, "_fastqc")
-  base <- sub("_+$", "", base)
+  base <- sub("[._-]+$", "", base)
   base
 }
 
