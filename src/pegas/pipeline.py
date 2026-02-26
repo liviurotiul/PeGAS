@@ -57,6 +57,12 @@ ENV_SPECS = {
 }
 ENV_CACHE = {}
 CONDA_CHECKED = False
+ROARY_FALLBACK_SPECS = [
+    "roary=3.13.0",
+    "roary=3.13",
+    "roary=3.12",
+    "roary",
+]
 
 
 def ensure_dir(path):
@@ -107,6 +113,24 @@ def env_paths(tool_name):
     return env_path, yml_path, meta_path
 
 
+def create_roary_env_with_fallbacks(env_path):
+    for spec in ROARY_FALLBACK_SPECS:
+        if os.path.isdir(env_path):
+            shutil.rmtree(env_path, ignore_errors=True)
+        tqdm.write(f"[pegas] Retrying roary env with fallback spec '{spec}'.")
+        cmd = [
+            "conda", "create", "-p", env_path, "-y",
+            "-c", "conda-forge",
+            "-c", "bioconda",
+            "-c", "defaults",
+            spec,
+        ]
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            return spec
+    return None
+
+
 def ensure_env(tool_name):
     ensure_conda_available()
     if tool_name in ENV_CACHE:
@@ -137,11 +161,18 @@ def ensure_env(tool_name):
     tqdm.write(f"[pegas] Creating env for {tool_name}.")
     cmd = ["conda", "env", "create", "-p", env_path, "-f", yml_path, "-y"]
     result = subprocess.run(cmd)
+    fallback_spec = None
     if result.returncode != 0:
-        raise subprocess.CalledProcessError(result.returncode, cmd)
+        if tool_name == "roary":
+            fallback_spec = create_roary_env_with_fallbacks(env_path)
+        if fallback_spec is None:
+            raise subprocess.CalledProcessError(result.returncode, cmd)
 
     with open(meta_path, "w") as f:
-        json.dump({"yml_hash": current_hash}, f)
+        meta = {"yml_hash": current_hash}
+        if fallback_spec is not None:
+            meta["fallback_spec"] = fallback_spec
+        json.dump(meta, f)
 
     ENV_CACHE[tool_name] = env_path
     return env_path
