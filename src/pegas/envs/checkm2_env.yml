@@ -1,0 +1,6 @@
+name: checkm2_env
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - checkm2

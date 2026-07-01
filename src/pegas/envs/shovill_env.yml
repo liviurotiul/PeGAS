@@ -1,8 +1,7 @@
 name: shovill_env
 channels:
-  - defaults
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
   - shovill
   - megahit=1.1.2

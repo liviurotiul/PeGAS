@@ -1,0 +1,6 @@
+name: quast_env
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - quast

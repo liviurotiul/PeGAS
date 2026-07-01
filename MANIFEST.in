@@ -5,4 +5,5 @@ include src/pegas/report_template.Rmd
 include src/pegas/render_report.R
 include src/pegas/report_static.css
 include src/pegas/envs/*.yml
+include src/pegas/envs/*.pin.txt
 include src/pegas/gc_content.json

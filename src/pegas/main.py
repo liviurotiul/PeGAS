@@ -11,7 +11,8 @@ from tqdm import tqdm
 from glob import glob
 import multiprocessing as mp
 
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 CAP = 16
 READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
@@ -22,6 +23,8 @@ TOOL_VERSION_PACKAGES = {
     "abricate": ["abricate"],
     "mlst": ["mlst"],
     "prokka": ["prokka"],
+    "quast": ["quast"],
+    "checkm2": ["checkm2"],
     "roary": ["roary"],
     "rscript": ["r-base"],
 }
@@ -41,7 +44,15 @@ def build_parser():
     parser.add_argument("--shovill-cpu-cores", type=int)
     parser.add_argument("--shovill-ram", type=int, help="RAM (GB) to allocate to Shovill")
     parser.add_argument("--prokka-cpu-cores", type=int)
+    parser.add_argument("--quast-cpu-cores", type=int)
+    parser.add_argument("--checkm2-cpu-cores", type=int)
     parser.add_argument("--roary-cpu-cores",  type=int)
+    parser.add_argument(
+        "--on-tool-failure",
+        choices=("stop", "warn"),
+        default="stop",
+        help="Stop on tool failures, or warn and continue with explicit failed/skipped sample status.",
+    )
     parser.add_argument("--interactive", action="store_true",
                         help="Generate the interactive HTML report (optional)")
     parser.add_argument("--no-r-report", action="store_true",
@@ -84,6 +95,10 @@ def finalize_arguments(args, lite_mode=False):
             args.shovill_cpu_cores = min(CAP, args.cores)
         if args.prokka_cpu_cores is None:
             args.prokka_cpu_cores = args.cores
+        if args.quast_cpu_cores is None:
+            args.quast_cpu_cores = args.cores
+        if args.checkm2_cpu_cores is None:
+            args.checkm2_cpu_cores = args.cores
         if args.roary_cpu_cores is None:
             args.roary_cpu_cores = args.cores
     else:
@@ -102,6 +117,10 @@ def finalize_arguments(args, lite_mode=False):
             args.shovill_cpu_cores = default_chunk(args.cores)
         if args.prokka_cpu_cores is None:
             args.prokka_cpu_cores = default_chunk(args.cores)
+        if args.quast_cpu_cores is None:
+            args.quast_cpu_cores = default_chunk(args.cores)
+        if args.checkm2_cpu_cores is None:
+            args.checkm2_cpu_cores = args.cores
         if args.roary_cpu_cores is None:
             args.roary_cpu_cores = args.cores
 
@@ -252,7 +271,10 @@ def write_run_config(output_dir, data_dir, args, tool_versions=None):
         "shovill_cpu_cores": args.shovill_cpu_cores,
         "shovill_ram": args.shovill_ram,
         "prokka_cpu_cores": args.prokka_cpu_cores,
+        "quast_cpu_cores": getattr(args, "quast_cpu_cores", None),
+        "checkm2_cpu_cores": getattr(args, "checkm2_cpu_cores", None),
         "roary_cpu_cores": args.roary_cpu_cores,
+        "on_tool_failure": args.on_tool_failure,
         "simple_report": bool(args.simple_report),
         "interactive_report": bool(args.interactive),
         "r_report": bool(args.simple_report),
@@ -368,7 +390,8 @@ def main():
         f"simple_report={args.simple_report}",
         f"interactive_report={args.interactive}",
         f"r_report={args.simple_report}",
-        f"html_report={args.interactive}"
+        f"html_report={args.interactive}",
+        f"on_tool_failure='{args.on_tool_failure}'",
     ]
 
     if args.shovill_cpu_cores:
@@ -377,6 +400,10 @@ def main():
         config_params.append(f"shovill_ram={args.shovill_ram}")
     if args.prokka_cpu_cores:
         config_params.append(f"prokka_cpu_cores={args.prokka_cpu_cores}")
+    if args.quast_cpu_cores:
+        config_params.append(f"quast_cpu_cores={args.quast_cpu_cores}")
+    if args.checkm2_cpu_cores:
+        config_params.append(f"checkm2_cpu_cores={args.checkm2_cpu_cores}")
     if args.roary_cpu_cores:
         config_params.append(f"roary_cpu_cores={args.roary_cpu_cores}")
 
@@ -413,8 +440,18 @@ def main():
     tqdm.write("Running PeGAS pipeline with the following command:")
     tqdm.write(" ".join(command))
 
-    # Run the pipeline.
+    env_command = command + ["--conda-create-envs-only"]
+
+    # Check/create conda environments before running the pipeline jobs.
     subprocess.run(unlock_command)
+    env_result = subprocess.run(env_command)
+    if env_result.returncode != 0:
+        tqdm.write("Error: Snakemake failed while creating conda environments.")
+        sys.exit(env_result.returncode)
+    tool_versions = collect_tool_versions([os.path.join(output_dir, ".snakemake", "conda")])
+    write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
+
+    # Run the pipeline.
     result = subprocess.run(command)
     if result.returncode != 0:
         tqdm.write("Error: Snakemake pipeline failed.")

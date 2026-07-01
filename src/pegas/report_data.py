@@ -10,32 +10,32 @@ def load_and_preprocess_data():
     Returns:
     - df (DataFrame): Preprocessed DataFrame.
     """
-    warnings.filterwarnings("ignore")
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", category=FutureWarning)
     matplotlib.use('Agg')
 
     # Read results.csv.
     df = pd.read_csv("dataframe/results.csv", dtype={'SAMPLE': str})
 
     # Set the columns to the correct data types.
-    df = df.astype({
-        'SAMPLE': str,
-        'SPECIES': str,
-        'SUBTYPE': str,
-        'GENE': str,
-        'ACCESSION': str,
-        'PRODUCT': str,
-        '%IDENTITY': float,
-        '%COVERAGE': float,
-        'PREDICTION_SOURCE': str,
-        'CONTIG_LENGTH': int,
-        'CONTIG_COVERAGE': float,
-        'CONTIG_NUMBER': int
-    })
+    string_columns = ['SAMPLE', 'SPECIES', 'SUBTYPE', 'GENE', 'ACCESSION', 'PRODUCT', 'PREDICTION_SOURCE', 'SEQUENCE']
+    for col in string_columns:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
 
-    df["SEQUENCE"] = df["SEQUENCE"].str.replace("contig", "")
+    for col in ['%IDENTITY', '%COVERAGE', 'CONTIG_LENGTH', 'CONTIG_COVERAGE', 'CONTIG_NUMBER']:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    df['CONTIG_LENGTH'] = df['CONTIG_LENGTH'].astype(int)
+    df['CONTIG_NUMBER'] = df['CONTIG_NUMBER'].astype(int)
+
+    df["SEQUENCE"] = df["SEQUENCE"].str.replace("contig", "", regex=False)
 
     # Convert to int.
-    df["CONTIG"] = df["SEQUENCE"].astype(int)
+    df["CONTIG"] = pd.to_numeric(df["SEQUENCE"], errors='coerce').fillna(0).astype(int)
 
     return df.drop(columns=["SEQUENCE"])
 

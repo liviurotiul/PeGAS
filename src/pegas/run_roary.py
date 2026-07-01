@@ -40,6 +40,9 @@ for species in eligible_species:
 
         src_gff = f"results/{sample}/prokka/{sample}.gff"
         dest_gff = os.path.join(species_dir, f"{sample}.gff")
+        if not os.path.isfile(src_gff) or os.path.getsize(src_gff) == 0:
+            tqdm.write(f"[pegas]Skipping {sample} for Roary: valid Prokka GFF not found.")
+            continue
 
         if os.path.isdir(dest_gff):
             tqdm.write(f"[pegas]Skipping {dest_gff}: expected a file, found a directory.")

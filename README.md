@@ -31,12 +31,19 @@ If you **don't have conda yet installed**, we recommend Miniforge: https://conda
 
 ### 2. pegas vs pegas-lite
 
-- **pegas:** Best for **many samples** and **high-throughput** runs, with **more RAM** and **disk space** available. Uses **Snakemake** (requires `mamba`).
-- **pegas-lite:** Best for **fewer samples** and **limited RAM/disk space**. **No Snakemake** (no `mamba` required).
+- **pegas:** Best for **many samples** and **high-throughput** runs, with **more RAM** and **disk space** available. Uses **Snakemake** with per-tool conda environments.
+- **pegas-lite:** Best for **fewer samples** and **limited RAM/disk space**. Runs the same tools directly without Snakemake.
+
+PeGAS does not install every bioinformatics tool into one large environment because several tools have conflicting dependency requirements. Instead, the command checks the required tool environments when it starts, creates any missing or stale environments, and then runs the analysis.
+
+- `pegas` creates Snakemake conda environments inside the output folder under `.snakemake/conda`.
+- `pegas-lite` creates reusable tool environments under `~/.pegas/envs`.
+- Bundled Linux lock/pin files are used when they match the platform; otherwise PeGAS falls back to the bundled environment YAML files.
+- The first run may spend time creating environments. Later runs reuse them when the specs still match.
 
 ### 3. Installing pegas (Snakemake)
 
-Install `mamba` once in your base conda environment:
+`mamba` is recommended for faster conda solving, but the PeGAS package itself is installed with conda:
 
 ```bash
 (base)user@user:~$ conda install conda-forge::mamba
@@ -73,9 +80,10 @@ Full usage (same for `pegas-lite`):
 ```bash
 usage: pegas [-h] -d DATA -o OUTPUT [-c CORES] [--overwrite]
              [--shovill-cpu-cores SHOVILL_CPU_CORES]
+             [--shovill-ram SHOVILL_RAM]
              [--prokka-cpu-cores PROKKA_CPU_CORES]
              [--roary-cpu-cores ROARY_CPU_CORES]
-             [--gc GC] [--interactive]
+             [--on-tool-failure {stop,warn}] [--interactive]
 
 Run the PeGAS pipeline.
 
@@ -89,26 +97,34 @@ options:
   --overwrite           Overwrite the output directory if it exists
   --shovill-cpu-cores SHOVILL_CPU_CORES
                         Number of CPU cores to use for Shovill
+  --shovill-ram SHOVILL_RAM
+                        RAM in GB to allocate to Shovill
   --prokka-cpu-cores PROKKA_CPU_CORES
                         Number of CPU cores to use for Prokka
   --roary-cpu-cores ROARY_CPU_CORES
                         Number of CPU cores to use for Roary
-  --gc GC               Custom JSON with GC content limits per species
+  --on-tool-failure {stop,warn}
+                        Stop on tool failures, or warn and continue with
+                        explicit failed/skipped sample status
   --interactive         Generate the interactive HTML report (optional)
 ```
 
-A model for the GC JSON file can be found here:
-https://github.com/liviurotiul/PeGAS/blob/main/src/pegas/gc_content.json
-
 ### 6. Reports and GUI
 
-- **Default report:** `report/report_r.html` (clean, static, shareable)
-- **Interactive report (optional):** add `--interactive` to generate `report/report.html`
+- **Default report:** `report/report_r.html` is a clean, static, shareable HTML report. It starts with interpretation-first sections for sample status, AMR, virulence, plasmids, thresholds, and tool/database versions.
+- **Interactive report (optional):** add `--interactive` to also generate the older Plotly/Jinja report at `report/report.html`.
 - **GUI:** run `pegas` or `pegas-lite` with no arguments to launch the GUI. The GUI mirrors the CLI flags.
 
 ### 7. Visualising the results
 
-After processing completes, check the `report/` folder and the `results/` folder inside the output directory.
+After processing completes, start with:
+
+- `report/report_r.html`: main static report.
+- `dataframe/sample_status.tsv`: per-sample status for FastQC, Shovill, Abricate, MLST, and Prokka.
+- `dataframe/results.csv`: combined AMR, virulence, plasmid, MLST, and assembly summary table.
+- `dataframe/database_versions.tsv`: Abricate database information when available.
+- `pegas_config.json`: run parameters and detected tool versions.
+- `results/`: per-sample tool outputs.
 
 ### PeGAS works out of the box on Linux systems. For Windows and macOS, we recommend using virtualization software like Docker or WSL.
 

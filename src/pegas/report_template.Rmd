@@ -47,7 +47,52 @@ render_searchable_table <- function(table_html, table_id, label = "") {
     "<input type=\"text\" class=\"table-search\" data-target=\"", table_id,
     "\" placeholder=\"", placeholder, "\" onkeyup=\"filterTable(this)\">"
   )
-  paste0(search_html, table_html)
+  # Wrap in a horizontal-scroll container so wide tables never spill out of
+  # the section card.
+  paste0(search_html, "<div class=\"table-scroll\">", table_html, "</div>")
+}
+
+escape_html_report <- function(x) {
+  if (is.null(x) || is.na(x)) {
+    return("NA")
+  }
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+render_df_table <- function(df, table_id, table_class = "samples-table") {
+  if (is.null(df) || nrow(df) == 0) {
+    return("")
+  }
+  header <- paste0(
+    "<tr>",
+    paste(vapply(names(df), function(name) {
+      paste0("<th>", escape_html_report(name), "</th>")
+    }, character(1)), collapse = ""),
+    "</tr>"
+  )
+  rows <- apply(df, 1, function(row) {
+    paste0(
+      "<tr>",
+      paste(vapply(row, function(value) {
+        value_text <- escape_html_report(value)
+        value_class <- paste0("status-", tolower(gsub("[^A-Za-z0-9]+", "-", value_text)))
+        paste0("<td class=\"", value_class, "\">", value_text, "</td>")
+      }, character(1)), collapse = ""),
+      "</tr>"
+    )
+  })
+  paste0(
+    "<table id=\"", table_id, "\" class=\"", table_class, "\">",
+    "<thead>", header, "</thead>",
+    "<tbody>", paste(rows, collapse = ""), "</tbody>",
+    "</table>"
+  )
 }
 ```
 
@@ -73,12 +118,15 @@ cat(
   }
   function initCollapsibleSections() {
     var sections = document.querySelectorAll('.section.level1');
-    sections.forEach(function(section) {
+    sections.forEach(function(section, index) {
       var heading = section.querySelector('h1');
       if (!heading) {
         return;
       }
-      section.classList.add('collapsible-section', 'collapsed');
+      section.classList.add('collapsible-section');
+      if (index > 0) {
+        section.classList.add('collapsed');
+      }
       heading.classList.add('collapsible-toggle');
       heading.addEventListener('click', function() {
         section.classList.toggle('collapsed');
@@ -238,6 +286,223 @@ if (length(samples) > 0) {
   cat(render_searchable_table(table_html, "samples-table", "Samples"))
 } else {
   cat("No FASTQ pairs found.\n")
+}
+```
+
+# Summary
+
+
+```{r interpretation_load, include=FALSE}
+dataframe_dir <- if (!is.null(params$dataframe_csv) && params$dataframe_csv != "") {
+  dirname(params$dataframe_csv)
+} else {
+  file.path(params$output_dir, "dataframe")
+}
+
+sample_status_path <- file.path(dataframe_dir, "sample_status.tsv")
+database_versions_path <- file.path(dataframe_dir, "database_versions.tsv")
+config_path <- if (!is.null(params$output_dir) && params$output_dir != "") {
+  file.path(params$output_dir, "pegas_config.json")
+} else {
+  ""
+}
+
+sample_status <- NULL
+if (file.exists(sample_status_path)) {
+  sample_status <- read.delim(sample_status_path, stringsAsFactors = FALSE, check.names = FALSE)
+}
+
+assembly_qc <- NULL
+assembly_qc_summary_path <- file.path(dataframe_dir, "assembly_qc.tsv")
+if (file.exists(assembly_qc_summary_path)) {
+  assembly_qc <- tryCatch(
+    read.delim(assembly_qc_summary_path, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(e) NULL
+  )
+}
+
+annotation_df <- NULL
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  annotation_df <- read_results_csv(params$dataframe_csv, check_names = FALSE)
+}
+
+run_config <- list()
+if (file.exists(config_path)) {
+  suppressPackageStartupMessages(library(jsonlite))
+  run_config <- tryCatch(jsonlite::fromJSON(config_path), error = function(e) list())
+}
+
+annotation_sources <- c("NCBI", "VFDB", "PlasmidFinder")
+annotation_hits <- NULL
+if (!is.null(annotation_df) && "PREDICTION_SOURCE" %in% names(annotation_df)) {
+  annotation_hits <- annotation_df[
+    annotation_df$PREDICTION_SOURCE %in% annotation_sources &
+      !is.na(annotation_df$GENE) & annotation_df$GENE != "",
+    ,
+    drop = FALSE
+  ]
+}
+```
+
+## Key findings
+
+```{r review_first, results='asis'}
+review_items <- character(0)
+
+if (!is.null(sample_status) && nrow(sample_status) > 0) {
+  stage_cols <- setdiff(names(sample_status), c("SAMPLE", "NOTES"))
+  problem_values <- c("failed", "skipped", "missing", "no_call")
+  problem_rows <- apply(sample_status[, stage_cols, drop = FALSE], 1, function(row) {
+    any(tolower(as.character(row)) %in% problem_values)
+  })
+  problem_count <- sum(problem_rows)
+  if (problem_count > 0) {
+    problem_samples <- paste(head(sample_status$SAMPLE[problem_rows], 8), collapse = ", ")
+    more <- if (problem_count > 8) paste0(" (+", problem_count - 8, " more)") else ""
+    review_items <- c(review_items, paste0(problem_count, " sample(s) have failed, skipped, missing, or no-call stages: ", problem_samples, more, "."))
+  } else {
+    review_items <- c(review_items, "All samples have complete core stage status.")
+  }
+}
+
+count_source_samples <- function(source) {
+  if (is.null(annotation_hits) || nrow(annotation_hits) == 0) {
+    return(0)
+  }
+  length(unique(annotation_hits$SAMPLE[annotation_hits$PREDICTION_SOURCE == source]))
+}
+
+amr_samples <- count_source_samples("NCBI")
+vir_samples <- count_source_samples("VFDB")
+plasmid_samples <- count_source_samples("PlasmidFinder")
+review_items <- c(
+  review_items,
+  paste0("AMR hits: ", amr_samples, " sample(s) with NCBI resistance annotations."),
+  paste0("Virulence hits: ", vir_samples, " sample(s) with VFDB annotations."),
+  paste0("Plasmid hits: ", plasmid_samples, " sample(s) with PlasmidFinder annotations.")
+)
+
+if (!is.null(assembly_qc) && nrow(assembly_qc) > 0 &&
+    all(c("COMPLETENESS", "CONTAMINATION") %in% names(assembly_qc))) {
+  completeness <- suppressWarnings(as.numeric(assembly_qc$COMPLETENESS))
+  contamination <- suppressWarnings(as.numeric(assembly_qc$CONTAMINATION))
+  if (any(!is.na(completeness)) || any(!is.na(contamination))) {
+    flagged <- (!is.na(completeness) & completeness < 90) | (!is.na(contamination) & contamination > 5)
+    flagged_count <- sum(flagged)
+    if (flagged_count > 0) {
+      flagged_samples <- paste(head(assembly_qc$SAMPLE[flagged], 8), collapse = ", ")
+      more <- if (flagged_count > 8) paste0(" (+", flagged_count - 8, " more)") else ""
+      review_items <- c(review_items, paste0(
+        "Genome quality (CheckM2): ", flagged_count,
+        " sample(s) below 90% completeness or above 5% contamination: ",
+        flagged_samples, more, "."
+      ))
+    } else {
+      review_items <- c(review_items, "Genome quality (CheckM2): all samples ≥ 90% complete and ≤ 5% contaminated.")
+    }
+  }
+}
+
+if (length(review_items) == 0) {
+  cat("No interpretation summary could be generated.\n")
+} else {
+  cat("<ul>")
+  for (item in review_items) {
+    cat(paste0("<li>", escape_html_report(item), "</li>"))
+  }
+  cat("</ul>")
+}
+```
+
+## Sample status
+
+```{r sample_status_table, results='asis'}
+if (is.null(sample_status) || nrow(sample_status) == 0) {
+  cat("No sample status table found.\n")
+} else {
+  # Shorten the redundant ABRICATE_* headers for display so the 11-column
+  # table fits (the underscore-joined names are otherwise unbreakable).
+  display_status <- sample_status
+  rename_map <- c(ABRICATE_NCBI = "NCBI", ABRICATE_PLASMIDFINDER = "PlasmidFinder", ABRICATE_VFDB = "VFDB")
+  for (old_name in names(rename_map)) {
+    names(display_status)[names(display_status) == old_name] <- rename_map[[old_name]]
+  }
+  table_html <- render_df_table(display_status, "sample-status-table", "samples-table status-table")
+  cat(render_searchable_table(table_html, "sample-status-table", "Sample status"))
+}
+```
+
+## AMR, virulence, and plasmid summary
+
+```{r annotation_summary, results='asis'}
+if (is.null(annotation_hits) || nrow(annotation_hits) == 0) {
+  cat("No AMR, virulence, or plasmid hits were reported.\n")
+} else {
+  source_labels <- data.frame(
+    PREDICTION_SOURCE = c("NCBI", "VFDB", "PlasmidFinder"),
+    Category = c("AMR", "Virulence", "Plasmid"),
+    stringsAsFactors = FALSE
+  )
+  summary_rows <- lapply(seq_len(nrow(source_labels)), function(i) {
+    source <- source_labels$PREDICTION_SOURCE[i]
+    subset <- annotation_hits[annotation_hits$PREDICTION_SOURCE == source, , drop = FALSE]
+    data.frame(
+      Category = source_labels$Category[i],
+      Source = source,
+      SamplesWithHits = length(unique(subset$SAMPLE)),
+      UniqueGenes = length(unique(subset$GENE)),
+      TotalHits = nrow(subset),
+      stringsAsFactors = FALSE
+    )
+  })
+  summary_df <- do.call(rbind, summary_rows)
+  cat(render_df_table(summary_df, "annotation-summary-table", "samples-table"))
+
+  samples_for_summary <- sort(unique(annotation_df$SAMPLE))
+  sample_rows <- lapply(samples_for_summary, function(sample) {
+    subset <- annotation_hits[annotation_hits$SAMPLE == sample, , drop = FALSE]
+    data.frame(
+      Sample = sample,
+      AMRGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "NCBI"])),
+      VirulenceGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "VFDB"])),
+      PlasmidGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "PlasmidFinder"])),
+      stringsAsFactors = FALSE
+    )
+  })
+  per_sample_df <- do.call(rbind, sample_rows)
+  cat(render_searchable_table(render_df_table(per_sample_df, "annotation-per-sample-table", "samples-table"), "annotation-per-sample-table", "Per-sample annotation summary"))
+}
+```
+
+## Tool and database versions
+
+```{r version_tables, results='asis'}
+tool_versions <- NULL
+if (!is.null(run_config$tool_versions) && length(run_config$tool_versions) > 0) {
+  tool_versions <- data.frame(
+    Tool = names(run_config$tool_versions),
+    Version = as.character(unlist(run_config$tool_versions)),
+    stringsAsFactors = FALSE
+  )
+}
+if (is.null(tool_versions) || nrow(tool_versions) == 0) {
+  cat("Tool versions were not recorded.\n")
+} else {
+  cat(render_df_table(tool_versions, "tool-version-table", "samples-table"))
+}
+
+if (file.exists(database_versions_path)) {
+  db_versions <- tryCatch(
+    read.delim(database_versions_path, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(e) NULL
+  )
+  if (!is.null(db_versions) && nrow(db_versions) > 0) {
+    cat(render_searchable_table(render_df_table(db_versions, "database-version-table", "samples-table"), "database-version-table", "Database versions"))
+  } else {
+    cat("Abricate database versions could not be parsed.\n")
+  }
+} else {
+  cat("Abricate database version table was not found.\n")
 }
 ```
 
@@ -737,37 +1002,14 @@ escape_html_assembly <- function(x) {
   x
 }
 
-assembly_rows <- list()
-sample_list <- character(0)
-species_lookup <- list()
-
-df_local <- NULL
-if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
-  df_local <- read_results_csv(params$dataframe_csv)
-  if ("SAMPLE" %in% names(df_local)) {
-    df_local <- df_local[!duplicated(df_local$SAMPLE), ]
-    sample_list <- as.character(df_local$SAMPLE)
+resolve_species_name <- function(code) {
+  if (is.null(code) || is.na(code) || code == "") {
+    return("Unknown")
   }
-}
-
-if (exists("sample_species") && length(sample_species) > 0) {
-  species_lookup <- sample_species
-}
-
-if (length(species_lookup) == 0 && !is.null(df_local) && "SPECIES" %in% names(df_local)) {
-  for (i in seq_len(nrow(df_local))) {
-    code <- df_local$SPECIES[i]
-    name <- if (exists("species_map") && !is.null(species_map[[code]])) {
-      species_map[[code]]
-    } else {
-      code
-    }
-    species_lookup[[df_local$SAMPLE[i]]] <- name
+  if (exists("species_map") && !is.null(species_map[[code]])) {
+    return(species_map[[code]])
   }
-}
-
-if (length(sample_list) == 0 && exists("samples")) {
-  sample_list <- samples
+  code
 }
 
 base_output <- if (!is.null(params$output_dir) && params$output_dir != "") {
@@ -776,33 +1018,95 @@ base_output <- if (!is.null(params$output_dir) && params$output_dir != "") {
   getwd()
 }
 
-for (sample in sample_list) {
-  contigs_file <- file.path(base_output, "results", sample, "shovill", "contigs.fa")
-  lens <- get_contig_lengths(contigs_file)
-  if (length(lens) == 0) {
-    next
-  }
-  sorted_lens <- sort(lens, decreasing = TRUE)
-  n50_value <- calc_n50(sorted_lens)
-  genome_length <- sum(lens)
-  species_name <- if (!is.null(species_lookup[[sample]])) {
-    species_lookup[[sample]]
-  } else {
-    "Unknown"
-  }
-  assembly_rows[[length(assembly_rows) + 1]] <- data.frame(
-    Sample = sample,
-    Contigs = length(lens),
-    Species = species_name,
-    GenomeLength = genome_length,
-    N50 = n50_value,
-    stringsAsFactors = FALSE
-  )
+assembly_qc_path <- ""
+if (!is.null(params$dataframe_csv) && params$dataframe_csv != "") {
+  assembly_qc_path <- file.path(dirname(params$dataframe_csv), "assembly_qc.tsv")
 }
 
 assembly_df <- NULL
-if (length(assembly_rows) > 0) {
-  assembly_df <- do.call(rbind, assembly_rows)
+
+# Preferred source: the QUAST + CheckM2 summary produced by build_dataframe.
+if (assembly_qc_path != "" && file.exists(assembly_qc_path)) {
+  aq <- tryCatch(
+    read.delim(assembly_qc_path, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(e) NULL
+  )
+  if (!is.null(aq) && nrow(aq) > 0 && "SAMPLE" %in% names(aq)) {
+    num_col <- function(name) {
+      if (name %in% names(aq)) suppressWarnings(as.numeric(aq[[name]])) else rep(NA_real_, nrow(aq))
+    }
+    assembly_df <- data.frame(
+      Sample = as.character(aq$SAMPLE),
+      Species = vapply(as.character(aq$SPECIES), resolve_species_name, character(1)),
+      Contigs = num_col("CONTIGS"),
+      GenomeLength = num_col("TOTAL_LENGTH"),
+      LargestContig = num_col("LARGEST_CONTIG"),
+      N50 = num_col("N50"),
+      L50 = num_col("L50"),
+      GC = num_col("GC_PERCENT"),
+      Completeness = num_col("COMPLETENESS"),
+      Contamination = num_col("CONTAMINATION"),
+      stringsAsFactors = FALSE
+    )
+    assembly_df <- assembly_df[!is.na(assembly_df$GenomeLength) | !is.na(assembly_df$N50), , drop = FALSE]
+    if (nrow(assembly_df) == 0) {
+      assembly_df <- NULL
+    }
+  }
+}
+
+# Fallback for older runs / the Snakemake path: derive metrics from contigs.fa.
+if (is.null(assembly_df)) {
+  sample_list <- character(0)
+  species_lookup <- list()
+  df_local <- NULL
+  if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+    df_local <- read_results_csv(params$dataframe_csv)
+    if ("SAMPLE" %in% names(df_local)) {
+      df_local <- df_local[!duplicated(df_local$SAMPLE), ]
+      sample_list <- as.character(df_local$SAMPLE)
+    }
+  }
+  if (exists("sample_species") && length(sample_species) > 0) {
+    species_lookup <- sample_species
+  }
+  if (length(species_lookup) == 0 && !is.null(df_local) && "SPECIES" %in% names(df_local)) {
+    for (i in seq_len(nrow(df_local))) {
+      species_lookup[[df_local$SAMPLE[i]]] <- resolve_species_name(df_local$SPECIES[i])
+    }
+  }
+  if (length(sample_list) == 0 && exists("samples")) {
+    sample_list <- samples
+  }
+  assembly_rows <- list()
+  for (sample in sample_list) {
+    contigs_file <- file.path(base_output, "results", sample, "shovill", "contigs.fa")
+    lens <- get_contig_lengths(contigs_file)
+    if (length(lens) == 0) {
+      next
+    }
+    sorted_lens <- sort(lens, decreasing = TRUE)
+    species_name <- if (!is.null(species_lookup[[sample]])) species_lookup[[sample]] else "Unknown"
+    assembly_rows[[length(assembly_rows) + 1]] <- data.frame(
+      Sample = sample,
+      Species = species_name,
+      Contigs = length(lens),
+      GenomeLength = sum(lens),
+      LargestContig = max(sorted_lens),
+      N50 = calc_n50(sorted_lens),
+      L50 = NA_real_,
+      GC = NA_real_,
+      Completeness = NA_real_,
+      Contamination = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }
+  if (length(assembly_rows) > 0) {
+    assembly_df <- do.call(rbind, assembly_rows)
+  }
+}
+
+if (!is.null(assembly_df) && nrow(assembly_df) > 0) {
   species_levels <- sort(unique(assembly_df$Species))
   assembly_df$Species <- factor(assembly_df$Species, levels = species_levels)
 }
@@ -810,35 +1114,83 @@ if (length(assembly_rows) > 0) {
 
 ```{r assembly_qc_table, results='asis'}
 if (is.null(assembly_df) || nrow(assembly_df) == 0) {
-  cat("No contig files found for assembly QC.\n")
+  cat("No assembly QC data found.\n")
 } else {
-  table_rows <- vapply(seq_len(nrow(assembly_df)), function(i) {
-    paste0(
+  fmt_int <- function(x) {
+    if (is.null(x) || length(x) == 0 || is.na(x)) return("&mdash;")
+    format(round(as.numeric(x)), big.mark = ",", scientific = FALSE, trim = TRUE)
+  }
+  fmt_pct <- function(x) {
+    if (is.null(x) || length(x) == 0 || is.na(x)) return("&mdash;")
+    sprintf("%.2f%%", as.numeric(x))
+  }
+  # CheckM2 quality flags: completeness should be high, contamination low.
+  completeness_class <- function(x) {
+    if (is.na(x)) return("")
+    if (x < 90) return("qc-flag-bad")
+    if (x < 95) return("qc-flag-warn")
+    "qc-flag-ok"
+  }
+  contamination_class <- function(x) {
+    if (is.na(x)) return("")
+    if (x > 10) return("qc-flag-bad")
+    if (x > 5) return("qc-flag-warn")
+    "qc-flag-ok"
+  }
+
+  has_checkm2 <- any(!is.na(assembly_df$Completeness)) || any(!is.na(assembly_df$Contamination))
+  ordered <- assembly_df[order(as.character(assembly_df$Species), assembly_df$Sample), , drop = FALSE]
+
+  table_rows <- vapply(seq_len(nrow(ordered)), function(i) {
+    row <- paste0(
       "<tr>",
-      "<td>", escape_html_assembly(assembly_df$Sample[i]), "</td>",
-      "<td class=\"num-cell\">", escape_html_assembly(format(assembly_df$Contigs[i], big.mark = ",", scientific = FALSE)), "</td>",
-      "<td class=\"num-cell\">", escape_html_assembly(format(assembly_df$GenomeLength[i], big.mark = ",", scientific = FALSE)), "</td>",
-      "<td class=\"num-cell\">", escape_html_assembly(format(assembly_df$N50[i], big.mark = ",", scientific = FALSE)), "</td>",
-      "</tr>"
+      "<td class=\"sample-name\">", escape_html_assembly(ordered$Sample[i]), "</td>",
+      "<td class=\"species-cell\">", escape_html_assembly(as.character(ordered$Species[i])), "</td>",
+      "<td class=\"num-cell\">", fmt_int(ordered$Contigs[i]), "</td>",
+      "<td class=\"num-cell\">", fmt_int(ordered$GenomeLength[i]), "</td>",
+      "<td class=\"num-cell\">", fmt_int(ordered$LargestContig[i]), "</td>",
+      "<td class=\"num-cell\">", fmt_int(ordered$N50[i]), "</td>",
+      "<td class=\"num-cell\">", fmt_int(ordered$L50[i]), "</td>",
+      "<td class=\"num-cell\">", if (is.na(ordered$GC[i])) "&mdash;" else sprintf("%.1f%%", ordered$GC[i]), "</td>"
     )
+    if (has_checkm2) {
+      row <- paste0(
+        row,
+        "<td class=\"num-cell ", completeness_class(ordered$Completeness[i]), "\">", fmt_pct(ordered$Completeness[i]), "</td>",
+        "<td class=\"num-cell ", contamination_class(ordered$Contamination[i]), "\">", fmt_pct(ordered$Contamination[i]), "</td>"
+      )
+    }
+    paste0(row, "</tr>")
   }, character(1))
+
+  header <- paste0(
+    "<th>Sample</th>",
+    "<th>Species</th>",
+    "<th>Contigs</th>",
+    "<th>Total length (bp)</th>",
+    "<th>Largest contig (bp)</th>",
+    "<th>N50 (bp)</th>",
+    "<th>L50</th>",
+    "<th>GC</th>"
+  )
+  if (has_checkm2) {
+    header <- paste0(header, "<th>Completeness</th>", "<th>Contamination</th>")
+  }
 
   table_html <- paste0(
     "<table id=\"assembly-table\" class=\"assembly-table\">",
-    "<thead><tr>",
-    "<th>Sample</th>",
-    "<th>Contigs</th>",
-    "<th>Total length (bp)</th>",
-    "<th>N50 (bp)</th>",
-    "</tr></thead>",
+    "<thead><tr>", header, "</tr></thead>",
     "<tbody>", paste(table_rows, collapse = ""), "</tbody>",
     "</table>"
   )
   cat(render_searchable_table(table_html, "assembly-table", "Assembly QC table"))
+  if (has_checkm2) {
+    cat("<p class=\"muted\">Completeness and contamination are CheckM2 estimates. Cells are flagged when completeness &lt; 95% or contamination &gt; 5% (red below 90% / above 10%).</p>")
+  }
 }
 ```
 
-```{r assembly_qc_plots, fig.width=9, fig.height=5, fig.align='center'}
+```{r assembly_qc_plots, fig.width=6.2, fig.height=4, out.width='49%', fig.show='hold', dpi=150}
 if (!is.null(assembly_df) && nrow(assembly_df) > 0) {
   p_genome <- ggplot(assembly_df, aes(x = Species, y = GenomeLength)) +
     geom_boxplot(
@@ -855,11 +1207,12 @@ if (!is.null(assembly_df) && nrow(assembly_df) > 0) {
     ) +
     scale_y_continuous(labels = function(x) format(x, big.mark = ",", scientific = FALSE)) +
     labs(x = NULL, y = "Genome length (bp)") +
-    theme_minimal(base_family = "sans") +
+    theme_minimal(base_size = 13, base_family = "sans") +
     theme(
       legend.position = "none",
-      axis.text.x = element_text(angle = 30, hjust = 1, face = "bold.italic"),
-      panel.grid.minor = element_blank()
+      axis.text.x = element_text(angle = 25, hjust = 1, face = "bold.italic"),
+      panel.grid.minor = element_blank(),
+      plot.margin = margin(8, 12, 6, 8)
     )
 
   p_n50 <- ggplot(assembly_df, aes(x = Species, y = N50)) +
@@ -877,15 +1230,45 @@ if (!is.null(assembly_df) && nrow(assembly_df) > 0) {
     ) +
     scale_y_continuous(labels = function(x) format(x, big.mark = ",", scientific = FALSE)) +
     labs(x = NULL, y = "N50 (bp)") +
-    theme_minimal(base_family = "sans") +
+    theme_minimal(base_size = 13, base_family = "sans") +
     theme(
       legend.position = "none",
-      axis.text.x = element_text(angle = 30, hjust = 1, face = "bold.italic"),
-      panel.grid.minor = element_blank()
+      axis.text.x = element_text(angle = 25, hjust = 1, face = "bold.italic"),
+      panel.grid.minor = element_blank(),
+      plot.margin = margin(8, 12, 6, 8)
     )
 
   print(p_genome)
   print(p_n50)
+}
+```
+
+```{r checkm2_plot, fig.width=7, fig.height=4.2, out.width='72%', fig.align='center', dpi=150}
+if (!is.null(assembly_df) && nrow(assembly_df) > 0 &&
+    (any(!is.na(assembly_df$Completeness)) || any(!is.na(assembly_df$Contamination)))) {
+  checkm2_df <- assembly_df[!is.na(assembly_df$Completeness) & !is.na(assembly_df$Contamination), , drop = FALSE]
+  if (nrow(checkm2_df) > 0) {
+    p_checkm2 <- ggplot(checkm2_df, aes(x = Completeness, y = Contamination)) +
+      annotate("rect", xmin = 90, xmax = 100, ymin = 0, ymax = 5,
+               fill = "#22c55e", alpha = 0.08) +
+      geom_hline(yintercept = 5, linetype = "dashed", color = "#f59e0b", linewidth = 0.4) +
+      geom_vline(xintercept = 90, linetype = "dashed", color = "#f59e0b", linewidth = 0.4) +
+      geom_point(aes(fill = Species), shape = 21, size = 3, alpha = 0.85, color = "#1f2937") +
+      labs(
+        x = "Completeness (%)",
+        y = "Contamination (%)",
+        fill = NULL,
+        title = "CheckM2 genome quality"
+      ) +
+      theme_minimal(base_size = 13, base_family = "sans") +
+      theme(
+        legend.position = "bottom",
+        plot.title = element_text(size = 14, face = "bold"),
+        panel.grid.minor = element_blank(),
+        plot.margin = margin(8, 12, 6, 8)
+      )
+    print(p_checkm2)
+  }
 }
 ```
 
