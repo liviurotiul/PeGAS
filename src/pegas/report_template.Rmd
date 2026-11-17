@@ -1,10 +1,11 @@
 ---
 title: "PeGAS report"
+subtitle: "`r paste0('PeGAS ', if (is.null(params$pegas_version) || params$pegas_version == '') 'unknown' else params$pegas_version, ' | ', format(Sys.time(), '%Y-%m-%d %H:%M'))`"
 output:
   html_document:
     toc: true
-    toc_depth: 2
-    number_sections: true
+    toc_depth: 1
+    number_sections: false
     theme: null
     highlight: null
     self_contained: true
@@ -124,9 +125,6 @@ cat(
         return;
       }
       section.classList.add('collapsible-section');
-      if (index > 0) {
-        section.classList.add('collapsed');
-      }
       heading.classList.add('collapsible-toggle');
       heading.addEventListener('click', function() {
         section.classList.toggle('collapsed');
@@ -138,159 +136,117 @@ cat(
 )
 ```
 
-# Inputs and run info
-
-
-```{r report_summary, echo=FALSE, results='asis'}
-report_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-pegas_version <- params$pegas_version
-if (is.null(pegas_version) || pegas_version == "") {
-  pegas_version <- "Unknown"
-}
-sample_count <- NA
-if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
-  df <- read_results_csv(params$dataframe_csv)
-  if ("SAMPLE" %in% names(df)) {
-    sample_count <- length(unique(df$SAMPLE))
-  } else {
-    sample_count <- nrow(df)
+```{r shared_helpers, include=FALSE}
+load_species_dict <- function(path) {
+  if (is.null(path) || path == "" || !file.exists(path)) {
+    return(list())
   }
-}
-sample_text <- if (is.na(sample_count)) "Unknown" else as.character(sample_count)
-cat(paste0("<b>PeGAS version</b>: ", pegas_version, "  \n"))
-cat(paste0("<b>Date generated</b>: ", report_time, "  \n"))
-cat(paste0("<b>Samples analyzed</b>: ", sample_text, "\n"))
-```
-
-```{r input_summary, results='asis'}
-cat(paste0("<b>Input directory</b>: ", params$data_dir, "  \n"))
-cat(paste0("<b>Output directory</b>: ", params$output_dir, "  \n"))
-```
-
-```{r sample_table, results='asis'}
-manifest_path <- NULL
-if (!is.null(params$output_dir) && params$output_dir != "") {
-  manifest_path <- file.path(params$output_dir, "sample_manifest.json")
-}
-
-format_mb <- function(bytes) {
-  if (is.na(bytes)) {
-    return("NA")
+  lines <- readLines(path, warn = FALSE)
+  start <- grep("^species_dict\\s*=\\s*\\{", lines)
+  if (length(start) == 0) {
+    return(list())
   }
-  sprintf("%.2f", bytes / (1024 * 1024))
-}
-
-parse_fastq_read <- function(filename) {
-  base <- basename(filename)
-  if (!grepl("\\\\.(fastq|fq)(\\\\.gz)?$", base, ignore.case = TRUE)) {
-    return(NULL)
+  entries <- lines[(start[1] + 1):length(lines)]
+  end <- grep("^\\}", entries)
+  if (length(end) > 0) {
+    entries <- entries[1:(end[1] - 1)]
   }
-  stem <- sub("\\\\.(fastq|fq)(\\\\.gz)?$", "", base, ignore.case = TRUE)
-  matches <- gregexpr("(?:R|(?<=[._-]))([12])(?=$|[._-])", stem, perl = TRUE, ignore.case = TRUE)
-  positions <- matches[[1]]
-  if (length(positions) == 0 || positions[1] == -1) {
-    return(NULL)
-  }
-  last_pos <- tail(positions, 1)
-  lengths <- attr(positions, "match.length")
-  last_len <- tail(lengths, 1)
-  token <- substr(stem, last_pos, last_pos + last_len - 1)
-  sample <- substr(stem, 1, last_pos - 1)
-  sample <- sub("[._-]+$", "", sample)
-  if (nchar(sample) == 0) {
-    return(NULL)
-  }
-  read_num <- sub(".*([12]).*", "\\\\1", token)
-  list(sample = sample, read = paste0("R", read_num))
-}
-
-pairs <- list()
-if (!is.null(manifest_path) && file.exists(manifest_path)) {
-  suppressPackageStartupMessages(library(jsonlite))
-  manifest <- jsonlite::fromJSON(manifest_path)
-  if (!is.null(manifest$sample_pairs)) {
-    pairs <- manifest$sample_pairs
-  }
-} else {
-  fastq_files <- character(0)
-  if (!is.null(params$data_dir) && dir.exists(params$data_dir)) {
-    fastq_files <- list.files(params$data_dir, pattern = "\\\\.(fastq|fq)(\\\\.gz)?$", full.names = TRUE, ignore.case = TRUE)
-  }
-  for (f in fastq_files) {
-    parsed <- parse_fastq_read(f)
-    if (is.null(parsed)) {
+  out <- list()
+  for (line in entries) {
+    line <- trimws(line)
+    if (line == "" || substr(line, 1, 1) == "#") {
       next
     }
-    sample <- parsed$sample
-    read <- parsed$read
-    if (is.null(pairs[[sample]])) {
-      pairs[[sample]] <- list()
+    match <- regexec("^\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"", line)
+    parts <- regmatches(line, match)[[1]]
+    if (length(parts) >= 3) {
+      out[[parts[2]]] <- parts[3]
     }
-    pairs[[sample]][[read]] <- f
   }
+  out
 }
 
-samples <- sort(names(pairs))
-if (length(samples) > 0) {
-  escape_html_sample <- function(x) {
-    if (is.null(x) || is.na(x)) {
-      return("NA")
-    }
-    x <- as.character(x)
-    x <- gsub("&", "&amp;", x, fixed = TRUE)
-    x <- gsub("<", "&lt;", x, fixed = TRUE)
-    x <- gsub(">", "&gt;", x, fixed = TRUE)
-    x <- gsub("\"", "&quot;", x, fixed = TRUE)
-    x <- gsub("'", "&#39;", x, fixed = TRUE)
-    x
-  }
-
-  row_html <- vapply(samples, function(sample) {
-    r1 <- pairs[[sample]][["R1"]]
-    r2 <- pairs[[sample]][["R2"]]
-    size_bytes <- 0
-    if (!is.null(r1) && file.exists(r1)) {
-      size_bytes <- size_bytes + file.info(r1)$size
-    }
-    if (!is.null(r2) && file.exists(r2)) {
-      size_bytes <- size_bytes + file.info(r2)$size
-    }
-    r1_text <- if (is.null(r1)) "" else r1
-    r2_text <- if (is.null(r2)) "" else r2
-    size_text <- format_mb(size_bytes)
-    paste0(
-      "<tr>",
-      "<td class=\"sample-name\">", escape_html_sample(sample), "</td>",
-      "<td class=\"path-cell\">", escape_html_sample(r1_text), "</td>",
-      "<td class=\"path-cell\">", escape_html_sample(r2_text), "</td>",
-      "<td class=\"size-cell\">", escape_html_sample(size_text), "</td>",
-      "</tr>"
-    )
-  }, character(1))
-
-  header_row <- paste0(
-    "<tr>",
-    "<th>Sample</th>",
-    "<th>R1 path</th>",
-    "<th>R2 path</th>",
-    "<th>Total size (Mb)</th>",
-    "</tr>"
-  )
-
-  table_html <- paste0(
-    "<table id=\"samples-table\" class=\"samples-table\">",
-    "<thead>", header_row, "</thead>",
-    "<tbody>", paste(row_html, collapse = ""), "</tbody>",
-    "</table>"
-  )
-  cat(render_searchable_table(table_html, "samples-table", "Samples"))
+species_map <- load_species_dict(if (!is.null(params$pegas_install_dir)) {
+  file.path(params$pegas_install_dir, "utils.py")
 } else {
-  cat("No FASTQ pairs found.\n")
+  ""
+})
+
+escape_html_table <- function(x) {
+  if (is.null(x) || is.na(x)) {
+    return("NA")
+  }
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+species_label <- function(code) {
+  code <- as.character(code)
+  if (is.na(code) || code == "") return("Unknown")
+  if (!is.null(species_map[[code]])) species_map[[code]] else code
+}
+
+df_annotations <- NULL
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df_annotations <- read_results_csv(params$dataframe_csv, check_names = FALSE)
+}
+
+is_point_mutation <- function(rows) {
+  subtype <- if ("ELEMENT_SUBTYPE" %in% names(rows)) as.character(rows$ELEMENT_SUBTYPE) else rep("", nrow(rows))
+  !is.na(subtype) & startsWith(subtype, "POINT")
+}
+
+# Gene pills for one sample; the tooltip carries drug class (AMR) and identity.
+gene_pills <- function(rows) {
+  rows <- rows[!is.na(rows$GENE) & rows$GENE != "", , drop = FALSE]
+  if (nrow(rows) == 0) return("<span class=\"muted\">None</span>")
+  pills <- vapply(sort(unique(rows$GENE)), function(gene) {
+    hit <- rows[rows$GENE == gene, , drop = FALSE]
+    ident <- suppressWarnings(max(as.numeric(hit[["%IDENTITY"]]), na.rm = TRUE))
+    drug <- if ("RESISTANCE" %in% names(hit)) unique(hit$RESISTANCE[!is.na(hit$RESISTANCE) & hit$RESISTANCE != ""]) else character(0)
+    tip <- c(if (length(drug) > 0) paste(drug, collapse = ", "), if (is.finite(ident)) sprintf("identity %.1f%%", ident))
+    alpha <- if (is.finite(ident)) max(0.2, min(0.85, ident / 100)) else 0.25
+    sprintf("<span class=\"gene-pill\" style=\"--pill-alpha:%.2f\" title=\"%s\">%s</span>",
+            alpha, escape_html_table(paste(tip, collapse = " | ")), escape_html_table(gene))
+  }, character(1))
+  paste(pills, collapse = " ")
+}
+
+# Species | Sample | one pill column per entry of `columns` (a row filter each).
+build_gene_table <- function(df_subset, table_class, table_id,
+                             columns = list(Genes = function(rows) rep(TRUE, nrow(rows)))) {
+  if (is.null(df_subset) || nrow(df_subset) == 0) return("")
+  df_subset$SPECIES_NAME <- vapply(df_subset$SPECIES, species_label, character(1))
+  body <- character(0)
+  for (sp in sort(unique(df_subset$SPECIES_NAME))) {
+    sp_rows <- df_subset[df_subset$SPECIES_NAME == sp, , drop = FALSE]
+    samples <- sort(unique(as.character(sp_rows$SAMPLE)))
+    for (i in seq_along(samples)) {
+      s_rows <- sp_rows[sp_rows$SAMPLE == samples[i], , drop = FALSE]
+      cells <- vapply(columns, function(keep) {
+        paste0("<td class=\"genes-cell\">", gene_pills(s_rows[keep(s_rows), , drop = FALSE]), "</td>")
+      }, character(1))
+      species_cell <- if (i == 1) paste0("<td class=\"species-cell\" rowspan=\"", length(samples), "\">", escape_html_table(sp), "</td>") else ""
+      body <- c(body, paste0("<tr>", species_cell, "<td class=\"sample-cell\">", escape_html_table(samples[i]), "</td>",
+                             paste(cells, collapse = ""), "</tr>"))
+    }
+  }
+  header <- paste0("<th>Species</th><th>Sample</th>", paste0("<th>", names(columns), "</th>", collapse = ""))
+  paste0("<table class=\"", table_class, "\" id=\"", table_id, "\"><thead><tr>", header,
+         "</tr></thead><tbody>", paste(body, collapse = ""), "</tbody></table>")
+}
+
+annotation_subset <- function(source) {
+  if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) return(NULL)
+  rows <- df_annotations[df_annotations$PREDICTION_SOURCE == source, , drop = FALSE]
+  if (nrow(rows) == 0) NULL else rows
 }
 ```
-
-# Summary
-
 
 ```{r interpretation_load, include=FALSE}
 dataframe_dir <- if (!is.null(params$dataframe_csv) && params$dataframe_csv != "") {
@@ -332,7 +288,7 @@ if (file.exists(config_path)) {
   run_config <- tryCatch(jsonlite::fromJSON(config_path), error = function(e) list())
 }
 
-annotation_sources <- c("AMR", "Virulence", "PlasmidFinder")
+annotation_sources <- c("AMR", "VFDB", "PlasmidFinder")
 annotation_hits <- NULL
 if (!is.null(annotation_df) && "PREDICTION_SOURCE" %in% names(annotation_df)) {
   annotation_hits <- annotation_df[
@@ -344,229 +300,229 @@ if (!is.null(annotation_df) && "PREDICTION_SOURCE" %in% names(annotation_df)) {
 }
 ```
 
-## Key findings
+# Overview
 
-```{r review_first, results='asis'}
-review_items <- character(0)
+```{r overview, results='asis'}
+all_samples <- if (!is.null(annotation_df)) sort(unique(as.character(annotation_df$SAMPLE))) else character(0)
+n_samples <- length(all_samples)
+samples_with <- function(keep) {
+  if (is.null(annotation_hits) || nrow(annotation_hits) == 0) return(character(0))
+  unique(annotation_hits$SAMPLE[keep(annotation_hits)])
+}
+amr_rows <- function(rows) rows$PREDICTION_SOURCE == "AMR"
+acquired <- samples_with(function(r) amr_rows(r) & !is_point_mutation(r))
+point <- samples_with(function(r) amr_rows(r) & is_point_mutation(r))
+virulence <- samples_with(function(r) r$PREDICTION_SOURCE == "VFDB")
+plasmid <- samples_with(function(r) r$PREDICTION_SOURCE == "PlasmidFinder")
 
-if (!is.null(sample_status) && nrow(sample_status) > 0) {
-  stage_cols <- setdiff(names(sample_status), c("SAMPLE", "NOTES"))
-  problem_values <- c("failed", "skipped", "missing", "no_call")
-  problem_rows <- apply(sample_status[, stage_cols, drop = FALSE], 1, function(row) {
-    any(tolower(as.character(row)) %in% problem_values)
-  })
-  problem_count <- sum(problem_rows)
-  if (problem_count > 0) {
-    problem_samples <- paste(head(sample_status$SAMPLE[problem_rows], 8), collapse = ", ")
-    more <- if (problem_count > 8) paste0(" (+", problem_count - 8, " more)") else ""
-    review_items <- c(review_items, paste0(problem_count, " sample(s) have failed, skipped, missing, or no-call stages: ", problem_samples, more, "."))
-  } else {
-    review_items <- c(review_items, "All samples have complete core stage status.")
+verdicts <- if (!is.null(assembly_qc) && "QC_STATUS" %in% names(assembly_qc)) as.character(assembly_qc$QC_STATUS) else character(0)
+qc_tile_class <- if (any(verdicts == "FAIL")) "tile tile-bad" else if (any(verdicts == "WARN")) "tile tile-warn" else "tile"
+tile <- function(value, label, class = "tile") {
+  paste0("<div class=\"", class, "\"><div class=\"tile-value\">", value, "</div><div class=\"tile-label\">", label, "</div></div>")
+}
+of_n <- function(x) paste0(length(x), "<span class=\"tile-of\"> / ", n_samples, "</span>")
+cat("<div class=\"tiles\">",
+    tile(n_samples, "Samples"),
+    if (length(verdicts) > 0) tile(paste0(sum(verdicts == "PASS"), " / ", sum(verdicts == "WARN"), " / ", sum(verdicts == "FAIL")),
+                                   "QC pass / warn / fail", qc_tile_class),
+    tile(of_n(acquired), "Samples with acquired AMR genes"),
+    tile(of_n(point), "Samples with AMR point mutations"),
+    tile(of_n(virulence), "Samples with VFDB virulence genes"),
+    tile(of_n(plasmid), "Samples with plasmid replicons"),
+    "</div>", sep = "")
+
+# Samples that need attention: failed/skipped steps or a QC warning.
+attention <- character(0)
+qc_verdict <- if (length(verdicts) > 0) setNames(verdicts, assembly_qc$SAMPLE) else character(0)
+qc_notes <- if (length(verdicts) > 0) setNames(as.character(assembly_qc$QC_NOTES), assembly_qc$SAMPLE) else character(0)
+for (s in all_samples) {
+  issues <- character(0)
+  if (!is.null(sample_status) && s %in% sample_status$SAMPLE) {
+    row <- sample_status[sample_status$SAMPLE == s, setdiff(names(sample_status), c("SAMPLE", "NOTES")), drop = FALSE]
+    bad <- names(row)[tolower(unlist(row)) %in% c("failed", "skipped", "missing")]
+    if (length(bad) > 0) issues <- c(issues, paste0(tolower(bad), " ", tolower(unlist(row)[bad])))
+  }
+  if (!is.na(qc_verdict[s]) && qc_verdict[s] %in% c("WARN", "FAIL")) {
+    issues <- c(issues, paste0("QC ", qc_verdict[s], " (", qc_notes[s], ")"))
+  }
+  if (length(issues) > 0) {
+    attention <- c(attention, paste0("<li><b>", escape_html_table(s), "</b>: ", escape_html_table(paste(issues, collapse = "; ")), "</li>"))
   }
 }
-
-count_source_samples <- function(source) {
-  if (is.null(annotation_hits) || nrow(annotation_hits) == 0) {
-    return(0)
-  }
-  length(unique(annotation_hits$SAMPLE[annotation_hits$PREDICTION_SOURCE == source]))
+if (length(attention) > 0) {
+  cat("<div class=\"attention\"><b>Needs attention</b><ul>", paste(attention, collapse = ""), "</ul></div>")
 }
 
-amr_samples <- count_source_samples("AMR")
-vir_samples <- count_source_samples("Virulence")
-point_samples <- if (!is.null(annotation_hits) && "ELEMENT_SUBTYPE" %in% names(annotation_hits)) {
-  length(unique(annotation_hits$SAMPLE[annotation_hits$PREDICTION_SOURCE == "AMR" & startsWith(annotation_hits$ELEMENT_SUBTYPE, "POINT")]))
+if (n_samples > 0) {
+  count_genes <- function(s, keep) {
+    if (is.null(annotation_hits)) return(0)
+    rows <- annotation_hits[annotation_hits$SAMPLE == s, , drop = FALSE]
+    length(unique(rows$GENE[keep(rows)]))
+  }
+  first_value <- function(s, column) {
+    v <- annotation_df[[column]][annotation_df$SAMPLE == s]
+    if (length(v) == 0) "" else as.character(v[1])
+  }
+  overview_df <- data.frame(
+    Sample = all_samples,
+    Species = vapply(all_samples, function(s) species_label(first_value(s, "SPECIES")), character(1)),
+    ST = vapply(all_samples, function(s) first_value(s, "SUBTYPE"), character(1)),
+    QC = vapply(all_samples, function(s) if (is.na(qc_verdict[s])) "" else qc_verdict[[s]], character(1)),
+    `Acquired AMR` = vapply(all_samples, count_genes, numeric(1), keep = function(r) amr_rows(r) & !is_point_mutation(r)),
+    `Point mutations` = vapply(all_samples, count_genes, numeric(1), keep = function(r) amr_rows(r) & is_point_mutation(r)),
+    `Virulence (VFDB)` = vapply(all_samples, count_genes, numeric(1), keep = function(r) r$PREDICTION_SOURCE == "VFDB"),
+    Plasmids = vapply(all_samples, count_genes, numeric(1), keep = function(r) r$PREDICTION_SOURCE == "PlasmidFinder"),
+    check.names = FALSE, stringsAsFactors = FALSE
+  )
+  cat(render_searchable_table(render_df_table(overview_df, "overview-table", "samples-table overview-table"), "overview-table", "samples"))
+  cat("<p class=\"note\">Distinct genes per sample. Gene lists are below and in <code>dataframe/</code> (matrices and <code>pegas_results.xlsx</code>).</p>")
+}
+```
+
+# Resistome
+
+<p class="note">AMRFinderPlus. Point mutations are screened for species with an AMRFinderPlus organism. Hover a gene for drug class and identity.</p>
+
+```{r resistome_table, results='asis'}
+res_df <- annotation_subset("AMR")
+if (is.null(res_df)) {
+  cat("No resistance genes or mutations found.\n")
 } else {
-  0
+  cat(render_searchable_table(build_gene_table(
+    res_df, "annotation-table resistome-table", "resistome-table",
+    columns = list(`Acquired genes` = function(r) !is_point_mutation(r), `Point mutations` = is_point_mutation)
+  ), "resistome-table", "resistome"))
 }
-plasmid_samples <- count_source_samples("PlasmidFinder")
-review_items <- c(
-  review_items,
-  paste0("AMR hits: ", amr_samples, " sample(s) with AMRFinderPlus resistance calls (", point_samples, " with resistance point mutations)."),
-  paste0("Virulence hits: ", vir_samples, " sample(s) with AMRFinderPlus virulence genes."),
-  paste0("Plasmid hits: ", plasmid_samples, " sample(s) with PlasmidFinder annotations.")
-)
+```
 
-if (!is.null(assembly_qc) && nrow(assembly_qc) > 0 && "QC_STATUS" %in% names(assembly_qc)) {
-  verdicts <- as.character(assembly_qc$QC_STATUS)
-  review_items <- c(review_items, paste0(
-    "Assembly QC: ", sum(verdicts == "PASS"), " PASS, ", sum(verdicts == "WARN"), " WARN, ",
-    sum(verdicts == "FAIL"), " FAIL (CheckM2 completeness/contamination, N50, contig count, GC vs species)."
-  ))
-  flagged <- which(verdicts %in% c("WARN", "FAIL"))
-  for (i in head(flagged, 8)) {
-    review_items <- c(review_items, paste0("QC ", verdicts[i], ": ", assembly_qc$SAMPLE[i], " (", assembly_qc$QC_NOTES[i], ")."))
+# Virulome
+
+<p class="note">Abricate with VFDB.</p>
+
+```{r virulome_table, results='asis'}
+vir_df <- annotation_subset("VFDB")
+if (is.null(vir_df)) {
+  cat("No virulence genes found.\n")
+} else {
+  cat(render_searchable_table(build_gene_table(vir_df, "annotation-table vfdb-table", "virulome-table"), "virulome-table", "virulome"))
+}
+```
+
+# Plasmids
+
+<p class="note">Abricate with PlasmidFinder.</p>
+
+```{r plasmid_table, results='asis'}
+pla_df <- annotation_subset("PlasmidFinder")
+if (is.null(pla_df)) {
+  cat("No plasmid replicons found.\n")
+} else {
+  cat(render_searchable_table(build_gene_table(pla_df, "annotation-table plasmid-table", "plasmid-table",
+                                               columns = list(Replicons = function(r) rep(TRUE, nrow(r)))),
+                              "plasmid-table", "plasmids"))
+}
+```
+
+# MLST
+
+```{r mlst_table, results='asis'}
+escape_html_mlst <- function(x) {
+  if (is.null(x) || is.na(x)) {
+    return("NA")
   }
-  if (length(flagged) > 8) {
-    review_items <- c(review_items, paste0("... and ", length(flagged) - 8, " more QC flag(s) in the Assembly QC table."))
-  }
-} else if (!is.null(assembly_qc) && nrow(assembly_qc) > 0 &&
-    all(c("COMPLETENESS", "CONTAMINATION") %in% names(assembly_qc))) {
-  completeness <- suppressWarnings(as.numeric(assembly_qc$COMPLETENESS))
-  contamination <- suppressWarnings(as.numeric(assembly_qc$CONTAMINATION))
-  if (any(!is.na(completeness)) || any(!is.na(contamination))) {
-    flagged <- (!is.na(completeness) & completeness < 90) | (!is.na(contamination) & contamination > 5)
-    flagged_count <- sum(flagged)
-    if (flagged_count > 0) {
-      flagged_samples <- paste(head(assembly_qc$SAMPLE[flagged], 8), collapse = ", ")
-      more <- if (flagged_count > 8) paste0(" (+", flagged_count - 8, " more)") else ""
-      review_items <- c(review_items, paste0(
-        "Genome quality (CheckM2): ", flagged_count,
-        " sample(s) below 90% completeness or above 5% contamination: ",
-        flagged_samples, more, "."
-      ))
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&#39;", x, fixed = TRUE)
+  x
+}
+
+df_mlst <- NULL
+if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
+  df_mlst <- read_results_csv(params$dataframe_csv, check_names = FALSE)
+}
+
+if (is.null(df_mlst) || !all(c("SAMPLE", "SUBTYPE", "SPECIES") %in% names(df_mlst))) {
+  cat("No MLST data found.\n")
+} else {
+  mlst_df <- df_mlst[, c("SAMPLE", "SUBTYPE", "SPECIES"), drop = FALSE]
+  mlst_df <- mlst_df[!is.na(mlst_df$SAMPLE) & mlst_df$SAMPLE != "", , drop = FALSE]
+  mlst_df <- mlst_df[!duplicated(mlst_df$SAMPLE), , drop = FALSE]
+  if (nrow(mlst_df) == 0) {
+    cat("No MLST data found.\n")
+  } else {
+    if (exists("species_map") && length(species_map) > 0) {
+      mlst_df$SPECIES_NAME <- vapply(mlst_df$SPECIES, function(code) {
+        if (!is.null(species_map[[code]])) {
+          species_map[[code]]
+        } else {
+          code
+        }
+      }, character(1))
     } else {
-      review_items <- c(review_items, "Genome quality (CheckM2): all samples ≥ 90% complete and ≤ 5% contaminated.")
+      mlst_df$SPECIES_NAME <- mlst_df$SPECIES
     }
-  }
-}
+    mlst_df$SUBTYPE <- ifelse(is.na(mlst_df$SUBTYPE) | mlst_df$SUBTYPE == "", "Unknown", mlst_df$SUBTYPE)
+    mlst_df <- mlst_df[order(mlst_df$SPECIES_NAME, mlst_df$SUBTYPE, mlst_df$SAMPLE), , drop = FALSE]
 
-if (length(review_items) == 0) {
-  cat("No interpretation summary could be generated.\n")
-} else {
-  cat("<ul>")
-  for (item in review_items) {
-    cat(paste0("<li>", escape_html_report(item), "</li>"))
-  }
-  cat("</ul>")
-}
-```
+    species_list <- unique(mlst_df$SPECIES_NAME)
+    row_html <- character(0)
+    for (sp in species_list) {
+      sp_rows <- mlst_df[mlst_df$SPECIES_NAME == sp, , drop = FALSE]
+      sp_rows <- sp_rows[order(sp_rows$SUBTYPE, sp_rows$SAMPLE), , drop = FALSE]
+      sp_rowspan <- nrow(sp_rows)
+      sp_first <- TRUE
+      subtypes <- unique(sp_rows$SUBTYPE)
+      for (st in subtypes) {
+        st_rows <- sp_rows[sp_rows$SUBTYPE == st, , drop = FALSE]
+        st_rows <- st_rows[order(st_rows$SAMPLE), , drop = FALSE]
+        st_rowspan <- nrow(st_rows)
+        st_first <- TRUE
+        for (i in seq_len(nrow(st_rows))) {
+          row <- "<tr>"
+          if (sp_first) {
+            row <- paste0(row, "<td class=\"species-cell\" rowspan=\"", sp_rowspan, "\">", escape_html_mlst(sp), "</td>")
+            sp_first <- FALSE
+          }
+          if (st_first) {
+            row <- paste0(row, "<td class=\"subtype-cell\" rowspan=\"", st_rowspan, "\">", escape_html_mlst(st), "</td>")
+            st_first <- FALSE
+          }
+          row <- paste0(
+            row,
+            "<td>", escape_html_mlst(st_rows$SAMPLE[i]), "</td>",
+            "</tr>"
+          )
+          row_html <- c(row_html, row)
+        }
+      }
+    }
 
-## Sample status
-
-```{r sample_status_table, results='asis'}
-if (is.null(sample_status) || nrow(sample_status) == 0) {
-  cat("No sample status table found.\n")
-} else {
-  # Shorten the redundant ABRICATE_* headers for display so the 11-column
-  # table fits (the underscore-joined names are otherwise unbreakable).
-  display_status <- sample_status
-  rename_map <- c(AMRFINDER = "AMRFinderPlus", PLASMIDFINDER = "PlasmidFinder", ABRICATE_NCBI = "NCBI", ABRICATE_PLASMIDFINDER = "PlasmidFinder", ABRICATE_VFDB = "VFDB")
-  for (old_name in names(rename_map)) {
-    names(display_status)[names(display_status) == old_name] <- rename_map[[old_name]]
-  }
-  table_html <- render_df_table(display_status, "sample-status-table", "samples-table status-table")
-  cat(render_searchable_table(table_html, "sample-status-table", "Sample status"))
-}
-```
-
-## AMR, virulence, and plasmid summary
-
-```{r annotation_summary, results='asis'}
-if (is.null(annotation_hits) || nrow(annotation_hits) == 0) {
-  cat("No AMR, virulence, or plasmid hits were reported.\n")
-} else {
-  source_labels <- data.frame(
-    PREDICTION_SOURCE = c("AMR", "Virulence", "PlasmidFinder"),
-    Category = c("AMR", "Virulence", "Plasmid"),
-    stringsAsFactors = FALSE
-  )
-  summary_rows <- lapply(seq_len(nrow(source_labels)), function(i) {
-    source <- source_labels$PREDICTION_SOURCE[i]
-    subset <- annotation_hits[annotation_hits$PREDICTION_SOURCE == source, , drop = FALSE]
-    data.frame(
-      Category = source_labels$Category[i],
-      Source = source,
-      SamplesWithHits = length(unique(subset$SAMPLE)),
-      UniqueGenes = length(unique(subset$GENE)),
-      TotalHits = nrow(subset),
-      stringsAsFactors = FALSE
+    table_html <- paste0(
+      "<table id=\"mlst-table\" class=\"annotation-table mlst-table\">",
+      "<thead><tr>",
+      "<th>Species</th>",
+      "<th>ST</th>",
+      "<th>Sample</th>",
+      "</tr></thead>",
+      "<tbody>", paste(row_html, collapse = ""), "</tbody>",
+      "</table>"
     )
-  })
-  summary_df <- do.call(rbind, summary_rows)
-  cat(render_df_table(summary_df, "annotation-summary-table", "samples-table"))
-
-  samples_for_summary <- sort(unique(annotation_df$SAMPLE))
-  sample_rows <- lapply(samples_for_summary, function(sample) {
-    subset <- annotation_hits[annotation_hits$SAMPLE == sample, , drop = FALSE]
-    data.frame(
-      Sample = sample,
-      AMRGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "AMR"])),
-      VirulenceGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "Virulence"])),
-      PlasmidGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "PlasmidFinder"])),
-      stringsAsFactors = FALSE
-    )
-  })
-  per_sample_df <- do.call(rbind, sample_rows)
-  cat(render_searchable_table(render_df_table(per_sample_df, "annotation-per-sample-table", "samples-table"), "annotation-per-sample-table", "Per-sample annotation summary"))
-}
-```
-
-## Tool and database versions
-
-```{r version_tables, results='asis'}
-tool_versions <- NULL
-if (!is.null(run_config$tool_versions) && length(run_config$tool_versions) > 0) {
-  tool_versions <- data.frame(
-    Tool = names(run_config$tool_versions),
-    Version = as.character(unlist(run_config$tool_versions)),
-    stringsAsFactors = FALSE
-  )
-}
-if (is.null(tool_versions) || nrow(tool_versions) == 0) {
-  cat("Tool versions were not recorded.\n")
-} else {
-  cat(render_df_table(tool_versions, "tool-version-table", "samples-table"))
-}
-
-if (file.exists(database_versions_path)) {
-  db_versions <- tryCatch(
-    read.delim(database_versions_path, stringsAsFactors = FALSE, check.names = FALSE),
-    error = function(e) NULL
-  )
-  if (!is.null(db_versions) && nrow(db_versions) > 0) {
-    cat(render_searchable_table(render_df_table(db_versions, "database-version-table", "samples-table"), "database-version-table", "Database versions"))
-  } else {
-    cat("Database versions could not be parsed.\n")
+    cat(render_searchable_table(table_html, "mlst-table", "MLST table"))
   }
-} else {
-  cat("Database version table was not found.\n")
 }
 ```
 
-# QC (Sequencing and Assembly)
+# Quality control
 
-
-## Sequencing QC
+## Sequencing
 
 ```{r qc_table, results='asis'}
 suppressPackageStartupMessages(library(rvest))
 suppressPackageStartupMessages(library(xml2))
 
-load_species_dict <- function(path) {
-  if (is.null(path) || path == "" || !file.exists(path)) {
-    return(list())
-  }
-  lines <- readLines(path, warn = FALSE)
-  start <- grep("^species_dict\\s*=\\s*\\{", lines)
-  if (length(start) == 0) {
-    return(list())
-  }
-  entries <- lines[(start[1] + 1):length(lines)]
-  end <- grep("^\\}", entries)
-  if (length(end) > 0) {
-    entries <- entries[1:(end[1] - 1)]
-  }
-  out <- list()
-  for (line in entries) {
-    line <- trimws(line)
-    if (line == "" || substr(line, 1, 1) == "#") {
-      next
-    }
-    match <- regexec("^\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"", line)
-    parts <- regmatches(line, match)[[1]]
-    if (length(parts) >= 3) {
-      out[[parts[2]]] <- parts[3]
-    }
-  }
-  out
-}
-
-species_map <- load_species_dict(if (!is.null(params$pegas_install_dir)) {
-  file.path(params$pegas_install_dir, "utils.py")
-} else {
-  ""
-})
 
 sample_species <- list()
 if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
@@ -967,7 +923,7 @@ if (length(qc_rows) > 0) {
 }
 ```
 
-## Assembly QC
+## Assembly
 
 ```{r assembly_qc_data, include=FALSE}
 suppressPackageStartupMessages(library(ggplot2))
@@ -1217,11 +1173,8 @@ if (is.null(assembly_df) || nrow(assembly_df) == 0) {
     "</table>"
   )
   cat(render_searchable_table(table_html, "assembly-table", "Assembly QC table"))
-  if (has_checkm2) {
-    cat("<p class=\"muted\">Completeness and contamination are CheckM2 estimates. Cells are flagged when completeness &lt; 90% or contamination &gt; 5% (red below 80% / above 10%).</p>")
-  }
   if (has_qc) {
-    cat("<p class=\"muted\">QC verdict: FAIL when completeness &lt; 80%, contamination &gt; 10%, N50 &lt; 5 kb or more than 1000 contigs; WARN when completeness &lt; 90%, contamination &gt; 5%, N50 &lt; 20 kb, more than 500 contigs, GC more than 2 points from the species' expected value, or no species assigned. Hover a verdict for the reason. The same values are in <code>dataframe/assembly_qc.tsv</code>.</p>")
+    cat("<p class=\"note\">FAIL: completeness &lt; 80%, contamination &gt; 10%, N50 &lt; 5 kb or &gt; 1000 contigs. WARN: completeness &lt; 90%, contamination &gt; 5%, N50 &lt; 20 kb, &gt; 500 contigs, GC &gt; 2 points off the species value, or no species. Hover a verdict for the reason.</p>")
   }
 }
 ```
@@ -1308,299 +1261,9 @@ if (!is.null(assembly_df) && nrow(assembly_df) > 0 &&
 }
 ```
 
-# MLST
-
-
-```{r mlst_table, results='asis'}
-escape_html_mlst <- function(x) {
-  if (is.null(x) || is.na(x)) {
-    return("NA")
-  }
-  x <- as.character(x)
-  x <- gsub("&", "&amp;", x, fixed = TRUE)
-  x <- gsub("<", "&lt;", x, fixed = TRUE)
-  x <- gsub(">", "&gt;", x, fixed = TRUE)
-  x <- gsub("\"", "&quot;", x, fixed = TRUE)
-  x <- gsub("'", "&#39;", x, fixed = TRUE)
-  x
-}
-
-df_mlst <- NULL
-if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
-  df_mlst <- read_results_csv(params$dataframe_csv, check_names = FALSE)
-}
-
-if (is.null(df_mlst) || !all(c("SAMPLE", "SUBTYPE", "SPECIES") %in% names(df_mlst))) {
-  cat("No MLST data found.\n")
-} else {
-  mlst_df <- df_mlst[, c("SAMPLE", "SUBTYPE", "SPECIES"), drop = FALSE]
-  mlst_df <- mlst_df[!is.na(mlst_df$SAMPLE) & mlst_df$SAMPLE != "", , drop = FALSE]
-  mlst_df <- mlst_df[!duplicated(mlst_df$SAMPLE), , drop = FALSE]
-  if (nrow(mlst_df) == 0) {
-    cat("No MLST data found.\n")
-  } else {
-    if (exists("species_map") && length(species_map) > 0) {
-      mlst_df$SPECIES_NAME <- vapply(mlst_df$SPECIES, function(code) {
-        if (!is.null(species_map[[code]])) {
-          species_map[[code]]
-        } else {
-          code
-        }
-      }, character(1))
-    } else {
-      mlst_df$SPECIES_NAME <- mlst_df$SPECIES
-    }
-    mlst_df$SUBTYPE <- ifelse(is.na(mlst_df$SUBTYPE) | mlst_df$SUBTYPE == "", "Unknown", mlst_df$SUBTYPE)
-    mlst_df <- mlst_df[order(mlst_df$SPECIES_NAME, mlst_df$SUBTYPE, mlst_df$SAMPLE), , drop = FALSE]
-
-    species_list <- unique(mlst_df$SPECIES_NAME)
-    row_html <- character(0)
-    for (sp in species_list) {
-      sp_rows <- mlst_df[mlst_df$SPECIES_NAME == sp, , drop = FALSE]
-      sp_rows <- sp_rows[order(sp_rows$SUBTYPE, sp_rows$SAMPLE), , drop = FALSE]
-      sp_rowspan <- nrow(sp_rows)
-      sp_first <- TRUE
-      subtypes <- unique(sp_rows$SUBTYPE)
-      for (st in subtypes) {
-        st_rows <- sp_rows[sp_rows$SUBTYPE == st, , drop = FALSE]
-        st_rows <- st_rows[order(st_rows$SAMPLE), , drop = FALSE]
-        st_rowspan <- nrow(st_rows)
-        st_first <- TRUE
-        for (i in seq_len(nrow(st_rows))) {
-          row <- "<tr>"
-          if (sp_first) {
-            row <- paste0(row, "<td class=\"species-cell\" rowspan=\"", sp_rowspan, "\">", escape_html_mlst(sp), "</td>")
-            sp_first <- FALSE
-          }
-          if (st_first) {
-            row <- paste0(row, "<td class=\"subtype-cell\" rowspan=\"", st_rowspan, "\">", escape_html_mlst(st), "</td>")
-            st_first <- FALSE
-          }
-          row <- paste0(
-            row,
-            "<td>", escape_html_mlst(st_rows$SAMPLE[i]), "</td>",
-            "</tr>"
-          )
-          row_html <- c(row_html, row)
-        }
-      }
-    }
-
-    table_html <- paste0(
-      "<table id=\"mlst-table\" class=\"annotation-table mlst-table\">",
-      "<thead><tr>",
-      "<th>Species</th>",
-      "<th>Subtype</th>",
-      "<th>Sample</th>",
-      "</tr></thead>",
-      "<tbody>", paste(row_html, collapse = ""), "</tbody>",
-      "</table>"
-    )
-    cat(render_searchable_table(table_html, "mlst-table", "MLST table"))
-  }
-}
-```
-
-# Virulome
-
-
-```{r virulome_table, results='asis'}
-escape_html_table <- function(x) {
-  if (is.null(x) || is.na(x)) {
-    return("NA")
-  }
-  x <- as.character(x)
-  x <- gsub("&", "&amp;", x, fixed = TRUE)
-  x <- gsub("<", "&lt;", x, fixed = TRUE)
-  x <- gsub(">", "&gt;", x, fixed = TRUE)
-  x <- gsub("\"", "&quot;", x, fixed = TRUE)
-  x <- gsub("'", "&#39;", x, fixed = TRUE)
-  x
-}
-
-build_gene_table <- function(df_subset, table_class, table_id = "") {
-  if (is.null(df_subset) || nrow(df_subset) == 0) {
-    return("")
-  }
-  if (!("SAMPLE" %in% names(df_subset)) || !("GENE" %in% names(df_subset))) {
-    return("")
-  }
-  species_map_local <- list()
-  if (exists("species_map")) {
-    species_map_local <- species_map
-  }
-  if ("SPECIES" %in% names(df_subset)) {
-    df_subset$SPECIES_NAME <- vapply(df_subset$SPECIES, function(code) {
-      if (!is.null(species_map_local[[code]])) {
-        species_map_local[[code]]
-      } else {
-        code
-      }
-    }, character(1))
-  } else {
-    df_subset$SPECIES_NAME <- "Unknown"
-  }
-  identity_col <- NULL
-  if ("%IDENTITY" %in% names(df_subset)) {
-    identity_col <- "%IDENTITY"
-  } else if ("X.IDENTITY" %in% names(df_subset)) {
-    identity_col <- "X.IDENTITY"
-  } else {
-    matches <- grep("IDENTITY", names(df_subset), value = TRUE)
-    matches <- setdiff(matches, "IDENTITY")
-    if (length(matches) > 0) {
-      identity_col <- matches[1]
-    }
-  }
-  df_subset$IDENTITY <- if (!is.null(identity_col)) {
-    suppressWarnings(as.numeric(df_subset[[identity_col]]))
-  } else {
-    NA_real_
-  }
-
-  calc_alpha <- function(value) {
-    if (is.na(value)) {
-      return(0.25)
-    }
-    alpha <- value / 100
-    alpha <- max(0.2, min(0.85, alpha))
-    alpha
-  }
-
-  df_subset$SAMPLE <- as.character(df_subset$SAMPLE)
-  df_subset$GENE <- as.character(df_subset$GENE)
-  df_subset$SPECIES_NAME <- as.character(df_subset$SPECIES_NAME)
-
-  species_list <- sort(unique(df_subset$SPECIES_NAME))
-  body_rows <- character(0)
-
-  for (sp in species_list) {
-    sp_rows <- df_subset[df_subset$SPECIES_NAME == sp, , drop = FALSE]
-    samples_sp <- sort(unique(sp_rows$SAMPLE))
-    rowspan <- length(samples_sp)
-    for (idx in seq_along(samples_sp)) {
-      sample <- samples_sp[idx]
-      subset_rows <- sp_rows[sp_rows$SAMPLE == sample, , drop = FALSE]
-      subset_rows <- subset_rows[!is.na(subset_rows$GENE) & subset_rows$GENE != "", , drop = FALSE]
-      genes_html <- ""
-      if (nrow(subset_rows) > 0) {
-        gene_agg <- tryCatch(
-          aggregate(IDENTITY ~ GENE, data = subset_rows, FUN = max, na.rm = TRUE),
-          error = function(e) NULL
-        )
-        if (!is.null(gene_agg) && nrow(gene_agg) > 0) {
-          gene_agg <- gene_agg[order(gene_agg$GENE), , drop = FALSE]
-          gene_spans <- vapply(seq_len(nrow(gene_agg)), function(j) {
-            gene <- escape_html_table(gene_agg$GENE[j])
-            ident <- gene_agg$IDENTITY[j]
-            alpha <- calc_alpha(ident)
-            ident_text <- if (is.na(ident)) "NA" else sprintf("%.1f", ident)
-            paste0(
-              "<span class=\"gene-pill\" style=\"--pill-alpha:", sprintf("%.2f", alpha), "\" ",
-              "title=\"Identity: ", ident_text, "%\">",
-              gene,
-              "</span>"
-            )
-          }, character(1))
-          genes_html <- paste(gene_spans, collapse = " ")
-        }
-      }
-      if (genes_html == "") {
-        genes_html <- "<span class=\"muted\">None</span>"
-      }
-      row <- "<tr>"
-      if (idx == 1) {
-        row <- paste0(row, "<td class=\"species-cell\" rowspan=\"", rowspan, "\">", escape_html_table(sp), "</td>")
-      }
-      row <- paste0(
-        row,
-        "<td class=\"sample-cell\">", escape_html_table(sample), "</td>",
-        "<td class=\"genes-cell\">", genes_html, "</td>",
-        "</tr>"
-      )
-      body_rows <- c(body_rows, row)
-    }
-  }
-
-  id_attr <- if (!is.null(table_id) && table_id != "") {
-    paste0(" id=\"", table_id, "\"")
-  } else {
-    ""
-  }
-  paste0(
-    "<table class=\"", table_class, "\"", id_attr, ">",
-    "<thead><tr>",
-    "<th>Species</th>",
-    "<th>Sample</th>",
-    "<th>Genes</th>",
-    "</tr></thead>",
-    "<tbody>", paste(body_rows, collapse = ""), "</tbody>",
-    "</table>"
-  )
-}
-
-df_annotations <- NULL
-if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
-  df_annotations <- read_results_csv(params$dataframe_csv, check_names = FALSE)
-}
-
-if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
-  cat("No virulence data found.\n")
-} else {
-  vir_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "Virulence", , drop = FALSE]
-  vir_df <- vir_df[, setdiff(names(vir_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
-  if (nrow(vir_df) == 0) {
-    cat("No virulence data found.\n")
-  } else {
-    vir_df <- vir_df[order(vir_df$SAMPLE), , drop = FALSE]
-    table_html <- build_gene_table(vir_df, "annotation-table vfdb-table", "virulome-table")
-    cat(render_searchable_table(table_html, "virulome-table", "Virulome table"))
-  }
-}
-```
-
-# Resistome
-
-
-```{r resistome_table, results='asis'}
-if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
-  cat("No resistance data found.\n")
-} else {
-  res_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "AMR", , drop = FALSE]
-  res_df <- res_df[, setdiff(names(res_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
-  if (nrow(res_df) == 0) {
-    cat("No resistance data found.\n")
-  } else {
-    res_df <- res_df[order(res_df$SAMPLE), , drop = FALSE]
-    table_html <- build_gene_table(res_df, "annotation-table resistome-table", "resistome-table")
-    cat(render_searchable_table(table_html, "resistome-table", "Resistome table"))
-  }
-}
-```
-
-# Plasmidome
-
-
-```{r plasmid_table, results='asis'}
-if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
-  cat("No plasmid data found.\n")
-} else {
-  pla_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "PlasmidFinder", , drop = FALSE]
-  pla_df <- pla_df[, setdiff(names(pla_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
-  if (nrow(pla_df) == 0) {
-    cat("No plasmid data found.\n")
-  } else {
-    pla_df <- pla_df[order(pla_df$SAMPLE), , drop = FALSE]
-    table_html <- build_gene_table(pla_df, "annotation-table plasmid-table", "plasmid-table")
-    cat(render_searchable_table(table_html, "plasmid-table", "Plasmid table"))
-  }
-}
-```
-
 # Pangenome
 
-
-```{r pangenome_heatmap, fig.align='center', out.width='80%', results='asis'}
+```{r pangenome_heatmap, results='asis'}
 suppressPackageStartupMessages(library(ggplot2))
 
 build_presence_matrix <- function(df, sample_names) {
@@ -1649,8 +1312,8 @@ if (!dir.exists(pangenome_dir)) {
     cat("No pangenome data found.\n")
   } else {
     sample_names <- character(0)
-    if (exists("df") && !is.null(df) && "SAMPLE" %in% names(df)) {
-      sample_names <- unique(as.character(df$SAMPLE))
+    if (!is.null(df_annotations)) {
+      sample_names <- unique(as.character(df_annotations$SAMPLE))
     }
     for (sp_dir in species_dirs) {
       roary_csv <- file.path(sp_dir, "output", "gene_presence_absence.csv")
@@ -1676,12 +1339,9 @@ if (!dir.exists(pangenome_dir)) {
       df_long$SampleIndex <- as.numeric(df_long$Sample)
       df_long$GeneIndex <- as.numeric(df_long$Gene)
 
-      cat(paste0("### Pangenome heatmap: ", sp_name, "\n\n"))
-      plot_width <- 20
-      base_height <- 1
-      row_height <- base_height / 3.5
-      plot_height <- max(base_height, nrow(mat) * row_height)
-      plot_aspect <- plot_width / plot_height
+      cat(paste0("<h3><i>", sp_name, "</i>: ", nrow(mat), " samples, ", ncol(mat), " genes</h3>\n\n"))
+      plot_width <- 11
+      plot_height <- max(2.2, 0.75 + 0.3 * nrow(mat))
 
       gene_counts <- colSums(mat)
       core_cutoff <- suppressWarnings(max(which(gene_counts == nrow(mat))))
@@ -1704,7 +1364,7 @@ if (!dir.exists(pangenome_dir)) {
         theme(
           legend.position = "none",
           panel.grid = element_blank(),
-          axis.text.y = element_text(size = 7, hjust = 1, color = "#4b5563"),
+          axis.text.y = element_text(size = 9, hjust = 1, color = "#374151"),
           axis.ticks.y = element_blank(),
           plot.margin = margin(4, 4, 18, 60)
         )
@@ -1724,16 +1384,194 @@ if (!dir.exists(pangenome_dir)) {
       ggsave(plot_path, plot = p, width = plot_width, height = plot_height, units = "in", dpi = 200, bg = "white")
       if (file.exists(plot_path)) {
         img_uri <- knitr::image_uri(plot_path)
-        cat(sprintf(
-          '<div style="width:100%%;aspect-ratio:%0.3f;margin:0 auto;"><img src="%s" alt="Pangenome heatmap" style="width:100%%;height:100%%;display:block;object-fit:contain;background:#ffffff;" /></div>\n\n',
-          plot_aspect,
-          img_uri
-        ))
+        cat(sprintf('<img class="plot" src="%s" alt="Pangenome heatmap" />\n\n', img_uri))
       } else {
         cat("Pangenome plot could not be rendered.\n")
       }
       cat("\n")
     }
   }
+}
+```
+
+# Run details
+
+## Sample status
+
+```{r sample_status_table, results='asis'}
+if (is.null(sample_status) || nrow(sample_status) == 0) {
+  cat("No sample status table found.\n")
+} else {
+  # Shorten the redundant ABRICATE_* headers for display so the 11-column
+  # table fits (the underscore-joined names are otherwise unbreakable).
+  display_status <- sample_status
+  rename_map <- c(AMRFINDER = "AMRFinderPlus", PLASMIDFINDER = "PlasmidFinder", ABRICATE_NCBI = "NCBI", ABRICATE_PLASMIDFINDER = "PlasmidFinder", ABRICATE_VFDB = "VFDB")
+  for (old_name in names(rename_map)) {
+    names(display_status)[names(display_status) == old_name] <- rename_map[[old_name]]
+  }
+  table_html <- render_df_table(display_status, "sample-status-table", "samples-table status-table")
+  cat(render_searchable_table(table_html, "sample-status-table", "sample status"))
+}
+```
+
+## Tool and database versions
+
+```{r version_tables, results='asis'}
+tool_versions <- NULL
+if (!is.null(run_config$tool_versions) && length(run_config$tool_versions) > 0) {
+  tool_versions <- data.frame(
+    Tool = names(run_config$tool_versions),
+    Version = as.character(unlist(run_config$tool_versions)),
+    stringsAsFactors = FALSE
+  )
+}
+if (is.null(tool_versions) || nrow(tool_versions) == 0) {
+  cat("Tool versions were not recorded.\n")
+} else {
+  esc <- function(x) vapply(x, escape_html_report, character(1))
+  cat("<p class=\"versions\">", paste0(esc(tool_versions$Tool), " <b>",
+      esc(tool_versions$Version), "</b>", collapse = " &middot; "), "</p>")
+}
+
+if (file.exists(database_versions_path)) {
+  db_versions <- tryCatch(
+    read.delim(database_versions_path, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(e) NULL
+  )
+  if (!is.null(db_versions) && nrow(db_versions) > 0) {
+    cat(render_searchable_table(render_df_table(db_versions, "database-version-table", "samples-table"), "database-version-table", "databases"))
+  } else {
+    cat("Database versions could not be parsed.\n")
+  }
+} else {
+  cat("Database version table was not found.\n")
+}
+```
+
+## Input files
+
+```{r input_summary, results='asis'}
+cat(paste0("<p class=\"note\">Input: <code>", params$data_dir, "</code><br>Output: <code>", params$output_dir, "</code></p>"))
+```
+
+```{r sample_table, results='asis'}
+manifest_path <- NULL
+if (!is.null(params$output_dir) && params$output_dir != "") {
+  manifest_path <- file.path(params$output_dir, "sample_manifest.json")
+}
+
+format_mb <- function(bytes) {
+  if (is.na(bytes)) {
+    return("NA")
+  }
+  sprintf("%.2f", bytes / (1024 * 1024))
+}
+
+parse_fastq_read <- function(filename) {
+  base <- basename(filename)
+  if (!grepl("\\\\.(fastq|fq)(\\\\.gz)?$", base, ignore.case = TRUE)) {
+    return(NULL)
+  }
+  stem <- sub("\\\\.(fastq|fq)(\\\\.gz)?$", "", base, ignore.case = TRUE)
+  matches <- gregexpr("(?:R|(?<=[._-]))([12])(?=$|[._-])", stem, perl = TRUE, ignore.case = TRUE)
+  positions <- matches[[1]]
+  if (length(positions) == 0 || positions[1] == -1) {
+    return(NULL)
+  }
+  last_pos <- tail(positions, 1)
+  lengths <- attr(positions, "match.length")
+  last_len <- tail(lengths, 1)
+  token <- substr(stem, last_pos, last_pos + last_len - 1)
+  sample <- substr(stem, 1, last_pos - 1)
+  sample <- sub("[._-]+$", "", sample)
+  if (nchar(sample) == 0) {
+    return(NULL)
+  }
+  read_num <- sub(".*([12]).*", "\\\\1", token)
+  list(sample = sample, read = paste0("R", read_num))
+}
+
+pairs <- list()
+if (!is.null(manifest_path) && file.exists(manifest_path)) {
+  suppressPackageStartupMessages(library(jsonlite))
+  manifest <- jsonlite::fromJSON(manifest_path)
+  if (!is.null(manifest$sample_pairs)) {
+    pairs <- manifest$sample_pairs
+  }
+} else {
+  fastq_files <- character(0)
+  if (!is.null(params$data_dir) && dir.exists(params$data_dir)) {
+    fastq_files <- list.files(params$data_dir, pattern = "\\\\.(fastq|fq)(\\\\.gz)?$", full.names = TRUE, ignore.case = TRUE)
+  }
+  for (f in fastq_files) {
+    parsed <- parse_fastq_read(f)
+    if (is.null(parsed)) {
+      next
+    }
+    sample <- parsed$sample
+    read <- parsed$read
+    if (is.null(pairs[[sample]])) {
+      pairs[[sample]] <- list()
+    }
+    pairs[[sample]][[read]] <- f
+  }
+}
+
+samples <- sort(names(pairs))
+if (length(samples) > 0) {
+  escape_html_sample <- function(x) {
+    if (is.null(x) || is.na(x)) {
+      return("NA")
+    }
+    x <- as.character(x)
+    x <- gsub("&", "&amp;", x, fixed = TRUE)
+    x <- gsub("<", "&lt;", x, fixed = TRUE)
+    x <- gsub(">", "&gt;", x, fixed = TRUE)
+    x <- gsub("\"", "&quot;", x, fixed = TRUE)
+    x <- gsub("'", "&#39;", x, fixed = TRUE)
+    x
+  }
+
+  row_html <- vapply(samples, function(sample) {
+    r1 <- pairs[[sample]][["R1"]]
+    r2 <- pairs[[sample]][["R2"]]
+    size_bytes <- 0
+    if (!is.null(r1) && file.exists(r1)) {
+      size_bytes <- size_bytes + file.info(r1)$size
+    }
+    if (!is.null(r2) && file.exists(r2)) {
+      size_bytes <- size_bytes + file.info(r2)$size
+    }
+    r1_text <- if (is.null(r1)) "" else r1
+    r2_text <- if (is.null(r2)) "" else r2
+    size_text <- format_mb(size_bytes)
+    paste0(
+      "<tr>",
+      "<td class=\"sample-name\">", escape_html_sample(sample), "</td>",
+      "<td class=\"path-cell\">", escape_html_sample(r1_text), "</td>",
+      "<td class=\"path-cell\">", escape_html_sample(r2_text), "</td>",
+      "<td class=\"size-cell\">", escape_html_sample(size_text), "</td>",
+      "</tr>"
+    )
+  }, character(1))
+
+  header_row <- paste0(
+    "<tr>",
+    "<th>Sample</th>",
+    "<th>R1 path</th>",
+    "<th>R2 path</th>",
+    "<th>Total size (Mb)</th>",
+    "</tr>"
+  )
+
+  table_html <- paste0(
+    "<table id=\"samples-table\" class=\"samples-table\">",
+    "<thead>", header_row, "</thead>",
+    "<tbody>", paste(row_html, collapse = ""), "</tbody>",
+    "</table>"
+  )
+  cat(render_searchable_table(table_html, "samples-table", "input files"))
+} else {
+  cat("No FASTQ pairs found.\n")
 }
 ```

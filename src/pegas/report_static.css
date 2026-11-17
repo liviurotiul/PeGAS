@@ -1,150 +1,136 @@
+/* PeGAS static report. Everything is inlined by rmarkdown (self_contained),
+   so the report stays a single HTML file that can be emailed. */
 :root {
-  --page-width: 210mm;
-  --page-padding: 20mm;
-  --page-padding-inline: 30mm;
-  --content-width: min(1360px, 94vw);
-  --page-bg: #ffffff;
-  --frame-bg: #f2f2f2;
-  --ink: #111111;
-  --muted: #555555;
+  --width: min(1240px, 94vw);
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --ink: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --head: #f1f5f8;
   --accent: #0b4f6c;
-  --border: #dddddd;
-  --mono: "JetBrains Mono", "Fira Mono", "SFMono-Regular", monospace;
-  --sans: "Source Sans 3", "IBM Plex Sans", "Fira Sans", "Avenir Next", "Helvetica Neue", sans-serif;
-  --serif: "Source Serif 4", "Charter", "Georgia", serif;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
+  --accent-soft: #e6f0f4;
+  --ok: rgba(34, 197, 94, 0.14);
+  --warn: rgba(245, 158, 11, 0.22);
+  --bad: rgba(220, 53, 69, 0.18);
+  --sans: "Inter", "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
 
 body {
-  background: var(--frame-bg);
+  margin: 0;
+  background: var(--bg);
   color: var(--ink);
-  font-family: var(--sans);
-  line-height: 1.5;
-  padding: 0;
+  font: 15px/1.55 var(--sans);
 }
 
-#TOC,
-.section.level1 {
-  width: var(--content-width);
-  max-width: var(--content-width);
+/* Layout: title, sticky section nav, one card per section */
+.title, .subtitle, #TOC, .section.level1 {
+  width: var(--width);
   margin-left: auto;
   margin-right: auto;
-  padding-left: 30px;
-  padding-right: 30px;
   box-sizing: border-box;
 }
 
-.section.level1 {
-  padding-bottom: 18px;
+h1.title {
+  margin-top: 28px;
+  margin-bottom: 2px;
+  padding: 0 4px;
+  font-size: 30px;
+  color: var(--accent);
 }
 
-/* Nested sub-sections must not re-apply the level-1 width/card, or they
-   overflow their parent card and force a horizontal scroll. */
-.section .section {
-  width: auto;
-  max-width: none;
-  margin: 0;
-  padding-left: 0;
-  padding-right: 0;
-  background: none;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-#TOC {
-  margin-bottom: 16mm;
-  font-size: 0.95em;
-}
-
-#TOC ul {
-  list-style: none;
-  padding-left: 0;
-}
-
-#TOC li {
-  margin: 0 0 4px 0;
-}
-
-#TOC a {
-  color: var(--ink);
-  text-decoration: none;
-}
-
-h1, h2, h3, h4 {
-  font-family: var(--sans);
-  font-weight: 600;
-  color: var(--ink);
-  margin-top: 1.2em;
-}
-
-h1 {
-  font-size: 28px;
-  letter-spacing: 0.3px;
-  border-bottom: 2px solid var(--border);
-  padding-bottom: 6px;
-}
-
-h2 {
-  font-size: 20px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 4px;
-}
-
-h3 {
-  font-size: 16px;
+h3.subtitle {
+  margin-top: 0;
+  padding: 0 4px;
+  font-size: 14px;
+  font-weight: 400;
   color: var(--muted);
 }
 
-p, ul, ol {
+#TOC {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin-top: 14px;
+  margin-bottom: 18px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+#TOC ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#TOC a {
+  display: block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: var(--ink);
   font-size: 14px;
+  text-decoration: none;
 }
 
-code, pre {
+#TOC a:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.section.level1 {
+  margin-bottom: 18px;
+  padding: 6px 28px 22px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  scroll-margin-top: 64px;
+}
+
+h1, h2, h3 {
+  font-family: var(--sans);
+  font-weight: 650;
+}
+
+.section.level1 > h1 {
+  margin: 14px 0 12px;
+  padding-bottom: 8px;
+  font-size: 22px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--line);
+}
+
+h2 {
+  margin: 24px 0 8px;
+  font-size: 17px;
+  color: #334155;
+}
+
+h3 {
+  margin: 18px 0 6px;
+  font-size: 15px;
+  color: #334155;
+}
+
+p, ul {
+  font-size: 15px;
+}
+
+code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
-.qc-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-  margin: 10px 0 18px;
-}
-
-.qc-table th,
-.qc-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 7px 10px;
-  vertical-align: top;
-  word-break: break-word;
-  text-align: left;
-}
-
-.qc-table th {
-  text-align: left;
-  background: #f7f7f7;
-  font-weight: 600;
-}
-
-.qc-cell {
-  background: #ffffff;
-}
-
-.qc-flag {
-  background: rgba(220, 53, 69, 0.18);
-}
-
-.qc-num {
-  text-align: left;
-}
-
-.qc-text {
-  text-align: left;
+.note, .muted {
+  color: var(--muted);
+  font-size: 13.5px;
 }
 
 img {
@@ -152,326 +138,93 @@ img {
   height: auto;
 }
 
-.meta-table {
+img.plot {
+  display: block;
   width: 100%;
-  border-collapse: collapse;
-  margin: 8px 0 16px;
-  font-size: 13px;
 }
 
-.meta-table th,
-.meta-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 6px 8px;
-  vertical-align: top;
-  text-align: left;
-}
-
-.meta-table th {
-  width: 28%;
-  text-align: left;
-  color: var(--muted);
-  font-weight: 600;
-}
-
-.samples-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 10px 0 18px;
-  font-size: 12px;
-}
-
-.samples-table th,
-.samples-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 6px 8px;
-  vertical-align: top;
-  text-align: left;
-}
-
-.samples-table th {
-  text-align: left;
-  background: #f7f7f7;
-  font-weight: 600;
-}
-
-.samples-table .sample-name {
-  font-weight: 600;
-}
-
-.samples-table .path-cell {
-  font-family: var(--mono);
-  font-size: 11px;
-  word-break: break-all;
-}
-
-.samples-table .size-cell {
-  text-align: left;
-  white-space: nowrap;
-}
-
-.status-table td[class*="status-ok"],
-.status-table td[class*="status-no-hits"] {
-  background: rgba(34, 197, 94, 0.12);
-}
-
-.status-table td[class*="status-failed"],
-.status-table td[class*="status-missing"] {
-  background: rgba(220, 53, 69, 0.16);
-  font-weight: 600;
-}
-
-.status-table td[class*="status-skipped"],
-.status-table td[class*="status-no-call"] {
-  background: rgba(245, 158, 11, 0.18);
-}
-
-.status-table td[class*="status-unknown"] {
-  background: rgba(107, 114, 128, 0.12);
-}
-
-.assembly-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0 18px;
-  font-size: 12px;
-}
-
-.assembly-table th,
-.assembly-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 6px 8px;
-  vertical-align: top;
-  text-align: left;
-}
-
-.assembly-table th {
-  text-align: left;
-  background: #f7f7f7;
-  font-weight: 600;
-}
-
-.assembly-table .num-cell {
-  text-align: left;
-  white-space: nowrap;
-}
-
-.annotation-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0 18px;
-  font-size: 12px;
-}
-
-.annotation-table th,
-.annotation-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 6px 8px;
-  vertical-align: top;
-  text-align: left;
-}
-
-.annotation-table th {
-  text-align: left;
-  background: #f7f7f7;
-  font-weight: 600;
-}
-
-.vfdb-table {
-  --pill-color: 96, 165, 250;
-}
-
-.resistome-table {
-  --pill-color: 249, 115, 22;
-}
-
-.plasmid-table {
-  --pill-color: 34, 197, 94;
-}
-
-.annotation-table .species-cell {
-  font-weight: 600;
-  font-style: italic;
-  width: 10%;
-  max-width: 10%;
-  white-space: nowrap;
-}
-
-.annotation-table .sample-cell {
-  font-family: var(--mono);
-  font-size: 11px;
-  width: 15%;
-  max-width: 15%;
-  white-space: nowrap;
-}
-
-.annotation-table .genes-cell {
-  line-height: 1.6;
-}
-
-.table-search {
-  width: 100%;
-  margin: 4px 0 10px 0;
-  padding: 6px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 12px;
-}
-
+/* Collapsible sections (open by default; click a heading to fold it) */
 .collapsible-section > h1 {
   cursor: pointer;
   position: relative;
-  padding-right: 18px;
-  font-weight: 600;
-  margin: 6px 0;
+  padding-right: 22px;
 }
 
 .collapsible-section > h1::after {
-  content: "▸";
+  content: "\25BE";
   position: absolute;
   right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 0.9em;
-  color: #6b7280;
+  color: #9ca3af;
+  font-size: 16px;
 }
 
-.collapsible-section:not(.collapsed) > h1::after {
-  content: "▾";
+.collapsible-section.collapsed > h1::after {
+  content: "\25B8";
 }
 
 .collapsible-section.collapsed > :not(h1) {
   display: none;
 }
 
-
-.mlst-table .species-cell {
-  width: 10%;
-  max-width: 10%;
+/* Overview tiles and attention box */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin: 8px 0 18px;
 }
 
-.mlst-table .subtype-cell {
-  width: 5%;
-  max-width: 5%;
+.tile {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
 }
 
-.mlst-table td,
-.mlst-table th {
-  white-space: nowrap;
+.tile-warn { border-left-color: #f59e0b; }
+.tile-bad { border-left-color: #dc3545; }
+
+.tile-value {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.gene-pill {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background-color: rgba(var(--pill-color, 37, 99, 235), var(--pill-alpha, 0.45));
-  color: #0f172a;
-  margin: 2px 4px 2px 0;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.muted {
+.tile-of {
+  font-size: 15px;
+  font-weight: 400;
   color: var(--muted);
 }
 
-/* ----------------------------------------------------------------------- */
-/* Visual polish                                                            */
-/* ----------------------------------------------------------------------- */
-:root {
-  --accent-soft: #e8f1f5;
-  --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05);
+.tile-label {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
 }
 
-body {
-  font-size: 16px;
-  line-height: 1.55;
-  color: #1f2937;
+.attention {
+  margin: 0 0 18px;
+  padding: 10px 16px;
+  background: #fff8eb;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
 }
 
-p, ul, ol {
-  font-size: 15px;
+.attention ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  font-size: 14px;
 }
 
-/* Report title banner */
-h1.title,
-.title {
-  width: var(--content-width);
-  max-width: var(--content-width);
-  margin: 0 auto;
-  padding: 26px 30px 12px;
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  color: var(--accent);
-  border-bottom: none;
-}
-
-/* Sections and TOC as cards (top-level only) */
-#TOC,
-.section.level1 {
-  background: var(--page-bg);
-  border: 1px solid #ececec;
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-}
-
-.section.level1 {
-  padding-top: 8px;
-  padding-bottom: 22px;
-  margin-bottom: 22px;
-}
-
-#TOC {
-  padding-top: 16px;
-  padding-bottom: 16px;
-}
-
-/* Accent on top-level section headings */
-.section > h1 {
-  color: var(--accent);
-  border-bottom: 2px solid var(--accent-soft);
-  border-left: 5px solid var(--accent);
-  padding-left: 12px;
-}
-
-h2 {
-  color: #243b53;
-}
-
-/* Table polish */
-.samples-table,
-.qc-table,
-.assembly-table,
-.annotation-table,
-.meta-table {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-/* Horizontal-scroll wrapper keeps wide tables inside the section card */
-.table-scroll {
-  overflow-x: auto;
-  max-width: 100%;
-  margin: 12px 0 10px;
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-}
-
-.table-scroll > table {
-  margin: 0;
-}
-
-.assembly-table tbody tr:nth-child(even) td,
-.qc-table tbody tr:nth-child(even) td {
-  background: #fafbfc;
-}
-
-.samples-table tbody tr:hover td,
-.assembly-table tbody tr:hover td,
-.qc-table tbody tr:hover td,
-.annotation-table tbody tr:hover td {
-  background: var(--accent-soft);
+/* Tables */
+.table-search {
+  width: 100%;
+  max-width: 320px;
+  margin: 6px 0 8px;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 .table-search:focus {
@@ -480,113 +233,92 @@ h2 {
   box-shadow: 0 0 0 3px rgba(11, 79, 108, 0.12);
 }
 
-/* Assembly QC table */
-.assembly-table .species-cell {
-  font-style: italic;
-  white-space: nowrap;
+.table-scroll {
+  overflow-x: auto;
+  margin: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
 
-.assembly-table .sample-name {
+.samples-table, .qc-table, .assembly-table, .annotation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.samples-table th, .samples-table td,
+.qc-table th, .qc-table td,
+.assembly-table th, .assembly-table td,
+.annotation-table th, .annotation-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.samples-table th, .qc-table th, .assembly-table th, .annotation-table th {
+  background: var(--head);
+  color: #334155;
   font-weight: 600;
-}
-
-/* CheckM2 quality flags */
-.qc-flag-ok {
-  background: rgba(34, 197, 94, 0.14) !important;
-}
-
-.qc-flag-warn {
-  background: rgba(245, 158, 11, 0.20) !important;
-  font-weight: 600;
-}
-
-.qc-flag-bad {
-  background: rgba(220, 53, 69, 0.20) !important;
-  font-weight: 600;
-}
-
-/* Larger, denser, more readable data tables */
-.samples-table,
-.qc-table,
-.assembly-table,
-.annotation-table,
-.meta-table {
-  font-size: 14.5px;
-  margin: 12px 0 10px;
-}
-
-.samples-table th,
-.samples-table td,
-.qc-table th,
-.qc-table td,
-.assembly-table th,
-.assembly-table td,
-.annotation-table th,
-.annotation-table td,
-.meta-table th,
-.meta-table td {
-  padding: 9px 14px;
-}
-
-.samples-table th,
-.qc-table th,
-.assembly-table th,
-.annotation-table th {
-  background: #eef4f7;
-  color: #243b53;
-  border-bottom: 2px solid #d6e3ea;
-}
-
-/* Right-align numeric columns of the Assembly QC table (Contigs onward).
-   Headers wrap so the 10-column table fits the card; numbers have no spaces
-   so they never break mid-value. */
-.assembly-table th:nth-child(n + 3),
-.assembly-table td:nth-child(n + 3) {
-  text-align: right;
-}
-
-.assembly-table th {
-  white-space: normal;
   vertical-align: bottom;
 }
 
-/* Tighter vertical rhythm to cut wasted space */
-h1 {
-  margin-top: 0.3em;
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #f8fafc; }
+
+/* Numbers never wrap mid-value */
+.qc-table td, .assembly-table td, .num-cell, .size-cell { white-space: nowrap; }
+.assembly-table th:nth-child(n + 3), .assembly-table td:nth-child(n + 3) { text-align: right; }
+
+.sample-name { font-weight: 600; }
+.species-cell { font-style: italic; white-space: nowrap; }
+.sample-cell { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.path-cell { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
+.mlst-table td, .mlst-table th { white-space: nowrap; }
+.genes-cell { line-height: 1.9; }
+
+/* Overview table: counts right-aligned, zeros dimmed, QC verdict coloured */
+.overview-table th:nth-child(n + 5), .overview-table td:nth-child(n + 5) { text-align: right; }
+.overview-table td.status-0 { color: #b6bcc6; }
+.overview-table td.status-pass { background: var(--ok); }
+.overview-table td.status-warn { background: var(--warn); font-weight: 600; }
+.overview-table td.status-fail { background: var(--bad); font-weight: 600; }
+
+/* Run status and QC flags */
+.status-table td[class*="status-ok"], .status-table td[class*="status-no-hits"] { background: var(--ok); }
+.status-table td[class*="status-skipped"], .status-table td[class*="status-no-call"] { background: var(--warn); }
+.status-table td[class*="status-failed"], .status-table td[class*="status-missing"] { background: var(--bad); font-weight: 600; }
+.qc-flag-ok { background: var(--ok) !important; }
+.qc-flag-warn { background: var(--warn) !important; font-weight: 600; }
+.qc-flag-bad, .qc-flag { background: var(--bad) !important; font-weight: 600; }
+
+/* Gene pills; opacity follows % identity */
+.gene-pill {
+  display: inline-block;
+  margin: 1px 3px 1px 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(var(--pill-color, 37, 99, 235), var(--pill-alpha, 0.45));
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
 }
 
-h2 {
-  margin-top: 0.9em;
-  font-size: 21px;
-}
+.resistome-table { --pill-color: 249, 115, 22; }
+.vfdb-table { --pill-color: 96, 165, 250; }
+.plasmid-table { --pill-color: 34, 197, 94; }
 
-.table-search {
-  max-width: 380px;
-  font-size: 13px;
+.versions {
+  font-size: 13.5px;
+  line-height: 1.9;
 }
 
 @media print {
-  body {
-    background: #ffffff;
-  }
-  #TOC,
-  .section.level1 {
-    width: auto;
-    max-width: none;
-    padding-left: 20mm;
-    padding-right: 20mm;
-    border: none;
-    box-shadow: none;
-    border-radius: 0;
-  }
-  .section .section {
-    padding-left: 0;
-    padding-right: 0;
-  }
-  .collapsible-section.collapsed > :not(h1) {
-    display: block;
-  }
-  .collapsible-section > h1::after {
-    content: "";
-  }
+  body { background: #fff; }
+  #TOC, .table-search { display: none; }
+  .section.level1 { width: auto; border: none; box-shadow: none; padding: 0 0 12px; }
+  .collapsible-section.collapsed > :not(h1) { display: block; }
+  .collapsible-section > h1::after { content: ""; }
+  .table-scroll { overflow: visible; border: none; }
 }

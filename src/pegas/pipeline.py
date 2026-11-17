@@ -928,14 +928,14 @@ def run_r_report(data_dir, output_dir, work_dir, interactive_report=False):
 
 
 def write_database_versions(work_dir):
-    """PlasmidFinder (abricate) and AMRFinderPlus database versions, in abricate --list format."""
+    """Abricate (PlasmidFinder, VFDB) and AMRFinderPlus database versions, in abricate --list format."""
     ensure_dir(os.path.join(work_dir, "dataframe"))
     output = os.path.join(work_dir, "dataframe", "database_versions.tsv")
     env_path = ensure_env("abricate")
     cmd = ["conda", "run", "-p", env_path, "--no-capture-output", "abricate", "--list"]
     result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True, check=False)
     lines = result.stdout.splitlines() if result.returncode == 0 else []
-    rows = [line for line in lines if line.split("\t")[0] in ("DATABASE", "plasmidfinder")]
+    rows = [line for line in lines if line.split("\t")[0] in ("DATABASE", "plasmidfinder", "vfdb")]
     if not rows:
         rows = ["DATABASE\tSEQUENCES\tDBTYPE\tDATE", "plasmidfinder\t-\t-\tunavailable"]
     try:
@@ -987,7 +987,8 @@ def run_pipeline(args):
     sample_names = sorted(sample_pairs.keys())
     run_mlst(sample_names, work_dir, failure_policy=failure_policy)
     run_amrfinder(sample_names, args.amrfinder_cpu_cores, work_dir, failure_policy=failure_policy)
-    run_abricate(sample_names, work_dir, "plasmidfinder", failure_policy=failure_policy)
+    for db_name in ("plasmidfinder", "vfdb"):
+        run_abricate(sample_names, work_dir, db_name, failure_policy=failure_policy)
     run_prokka(sample_names, args.prokka_cpu_cores, work_dir, failure_policy=failure_policy)
     run_quast(sample_names, args.quast_cpu_cores, work_dir, failure_policy=failure_policy)
     run_checkm2(sample_names, args.checkm2_cpu_cores, work_dir, failure_policy=failure_policy)

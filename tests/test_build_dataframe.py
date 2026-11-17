@@ -12,13 +12,14 @@ from pegas.common import pangenome_groups
 DATA = Path(__file__).parent / "data"
 
 
-def write_sample(root, sample, scheme, st, amrfinder=None, plasmidfinder=None):
+def write_sample(root, sample, scheme, st, amrfinder=None, plasmidfinder=None, vfdb=None):
     sample_dir = root / "results" / sample
     (sample_dir / "shovill").mkdir(parents=True)
     contig = "ACGTACGT" * 2000
     (sample_dir / "shovill" / "contigs.fa").write_text(f">contig00001 len={len(contig)} cov=30.0\n{contig}\n")
     (sample_dir / "mlst.tsv").write_text(f"contigs.fa\t{scheme}\t{st}\n")
-    for source, name in ((amrfinder, "amrfinder.tsv"), (plasmidfinder, "abricate_plasmidfinder.tsv")):
+    for source, name in ((amrfinder, "amrfinder.tsv"), (plasmidfinder, "abricate_plasmidfinder.tsv"),
+                         (vfdb, "abricate_vfdb.tsv")):
         if source:
             shutil.copy(source, sample_dir / name)
         else:
@@ -27,7 +28,8 @@ def write_sample(root, sample, scheme, st, amrfinder=None, plasmidfinder=None):
 
 @pytest.fixture
 def run_dir(tmp_path, monkeypatch):
-    write_sample(tmp_path, "EC1", "ecoli_achtman_4", "131", DATA / "amrfinder_ecoli.tsv", DATA / "plasmidfinder_ecoli.tsv")
+    write_sample(tmp_path, "EC1", "ecoli_achtman_4", "131", DATA / "amrfinder_ecoli.tsv", DATA / "plasmidfinder_ecoli.tsv",
+                 DATA / "vfdb_ecoli.tsv")
     write_sample(tmp_path, "EC2", "ecoli_achtman_4", "10", DATA / "amrfinder_ecoli.tsv")
     write_sample(tmp_path, "X1", "-", "-")
     pairs = {s: {"R1": f"/in/{s}_R1.fastq.gz", "R2": f"/in/{s}_R2.fastq.gz"} for s in ("EC1", "EC2", "X1")}
@@ -40,10 +42,10 @@ def run_dir(tmp_path, monkeypatch):
 def test_amrfinder_hits_are_mapped(run_dir):
     df = pd.read_csv("dataframe/results.csv", keep_default_na=False)
     ec1 = df[df.SAMPLE == "EC1"]
-    assert set(ec1.PREDICTION_SOURCE) == {"AMR", "Virulence", "Stress", "PlasmidFinder"}
+    assert set(ec1.PREDICTION_SOURCE) == {"AMR", "AMRFinder_virulence", "Stress", "PlasmidFinder", "VFDB"}
     gyra = ec1[ec1.GENE == "gyrA_S83L"].iloc[0]
     assert (gyra.ELEMENT_SUBTYPE, gyra.RESISTANCE, gyra.SEQUENCE) == ("POINT", "QUINOLONE", "contig00002")
-    assert set(ec1[ec1.PREDICTION_SOURCE == "Virulence"].RESISTANCE) == {""}
+    assert set(ec1[ec1.PREDICTION_SOURCE == "AMRFinder_virulence"].RESISTANCE) == {""}
 
 
 def test_unassigned_species_is_not_pooled(run_dir):
@@ -54,7 +56,7 @@ def test_unassigned_species_is_not_pooled(run_dir):
 
 def test_status_and_qc_tables(run_dir):
     status = pd.read_csv("dataframe/sample_status.tsv", sep="\t", index_col="SAMPLE")
-    assert status.loc["EC1", ["AMRFINDER", "PLASMIDFINDER", "MLST"]].tolist() == ["ok", "ok", "ok"]
+    assert status.loc["EC1", ["AMRFINDER", "PLASMIDFINDER", "VFDB", "MLST"]].tolist() == ["ok", "ok", "ok", "ok"]
     assert status.loc["X1", ["AMRFINDER", "MLST"]].tolist() == ["no_hits", "no_call"]
     qc = pd.read_csv("dataframe/assembly_qc.tsv", sep="\t", index_col="SAMPLE")
     assert str(qc.loc["EC1", "ST"]) == "131"
@@ -66,6 +68,8 @@ def test_status_and_qc_tables(run_dir):
 def test_presence_absence_matrices(run_dir):
     amr = pd.read_csv("dataframe/amr_matrix.tsv", sep="\t", index_col="SAMPLE")
     assert amr.loc["EC1", "gyrA_S83L"] == 1 and amr.loc["X1"].sum() == 0
+    virulence = pd.read_csv("dataframe/virulence_matrix.tsv", sep="\t", index_col="SAMPLE")
+    assert virulence.loc["EC1"].sum() == 3 and virulence.loc["EC2"].sum() == 0
     plasmid = pd.read_csv("dataframe/plasmid_matrix.tsv", sep="\t", index_col="SAMPLE")
     assert plasmid.loc["EC1"].sum() == 2 and plasmid.loc["EC2"].sum() == 0
     if os.path.exists("dataframe/pegas_results.xlsx"):

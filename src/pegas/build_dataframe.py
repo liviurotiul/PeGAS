@@ -63,9 +63,11 @@ AMRFINDER_COLUMNS = {
     "PREDICTION_SOURCE": ("Type", "Element type"),
 }
 # AMRFinderPlus "Type" -> PREDICTION_SOURCE label used by the reports.
-AMRFINDER_SOURCES = {"AMR": "AMR", "VIRULENCE": "Virulence", "STRESS": "Stress"}
+AMRFINDER_SOURCES = {"AMR": "AMR", "VIRULENCE": "AMRFinder_virulence", "STRESS": "Stress"}
+# Abricate database -> (PREDICTION_SOURCE, sample_status column).
+ABRICATE_DBS = {"plasmidfinder": ("PlasmidFinder", "PLASMIDFINDER"), "vfdb": ("VFDB", "VFDB")}
 # Presence/absence matrices written next to results.csv.
-MATRIX_SOURCES = {"AMR": "amr", "Virulence": "virulence", "PlasmidFinder": "plasmid"}
+MATRIX_SOURCES = {"AMR": "amr", "VFDB": "virulence", "PlasmidFinder": "plasmid"}
 
 STATUS_COLUMNS = [
     "SAMPLE",
@@ -74,6 +76,7 @@ STATUS_COLUMNS = [
     "MLST",
     "AMRFINDER",
     "PLASMIDFINDER",
+    "VFDB",
     "PROKKA",
     "QUAST",
     "CHECKM2",
@@ -365,12 +368,13 @@ def read_amrfinder(sample, markers):
     return out, "ok", ""
 
 
-def read_plasmidfinder(sample, markers):
-    df, status, note = read_tool_tsv(sample, "abricate_plasmidfinder", "abricate_plasmidfinder.tsv", markers)
+def read_abricate(sample, db_name, markers):
+    stage = f"abricate_{db_name}"
+    df, status, note = read_tool_tsv(sample, stage, f"{stage}.tsv", markers)
     if df is None:
         return pd.DataFrame(columns=RESULT_COLUMNS), status, note
     df = df.reindex(columns=ABRICATE_COLUMNS)
-    df["PREDICTION_SOURCE"] = "PlasmidFinder"
+    df["PREDICTION_SOURCE"] = ABRICATE_DBS[db_name][0]
     return df, "ok", ""
 
 
@@ -545,8 +549,11 @@ def build_dataframe():
 
         hit_frames = []
         hit_statuses = {}
-        for status_column, reader in (("AMRFINDER", read_amrfinder), ("PLASMIDFINDER", read_plasmidfinder)):
-            df_hits, status, note = reader(sample, markers)
+        readers = [("AMRFINDER", lambda: read_amrfinder(sample, markers))] + [
+            (column, lambda db=db: read_abricate(sample, db, markers)) for db, (_, column) in ABRICATE_DBS.items()
+        ]
+        for status_column, reader in readers:
+            df_hits, status, note = reader()
             hit_statuses[status_column] = status
             if note:
                 notes.append(note)

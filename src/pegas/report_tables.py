@@ -11,7 +11,7 @@ from .utils import create_html_widget
 
 def create_annotation_tables(df, species_dict):
     """
-    Creates three HTML tables summarizing annotations from AMRFinderPlus (AMR, virulence) and PlasmidFinder,
+    Creates three HTML tables summarizing annotations from AMRFinderPlus (AMR), VFDB and PlasmidFinder,
     with custom CSS to set the table width to 100%.
 
     Parameters:
@@ -27,7 +27,7 @@ def create_annotation_tables(df, species_dict):
     # Define predictors and their corresponding table names.
     predictors = {
         'AMR': 'Resistance',
-        'Virulence': 'Virulence',
+        'VFDB': 'Virulence',
         'PlasmidFinder': 'Plasmid'
     }
 
@@ -404,7 +404,7 @@ def generate_virulence_factor_table(df, species_dict):
     - tables (dict): Dictionary with species names as keys and HTML code for tables as values.
     """
     # Filter the DataFrame for virulence factors.
-    df_virulence = df[df['PREDICTION_SOURCE'] == 'Virulence']
+    df_virulence = df[df['PREDICTION_SOURCE'] == 'VFDB']
 
     species = df_virulence['SPECIES'].unique()
 

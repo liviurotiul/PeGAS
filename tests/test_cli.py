@@ -72,5 +72,5 @@ def test_snakefile_dry_run(tmp_path):
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    for rule in ("shovill", "mlst", "amrfinder_organism", "amrfinder", "plasmidfinder", "build_dataframe"):
+    for rule in ("shovill", "mlst", "amrfinder_organism", "amrfinder", "abricate", "abricate_vfdb.tsv", "build_dataframe"):
         assert rule in result.stdout

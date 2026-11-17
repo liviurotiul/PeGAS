@@ -60,6 +60,7 @@ else:
     sample_pairs = build_fastq_pairs(list_fastq_files(raw_data_path))
 
 sample_names = sorted(sample_pairs)
+ABRICATE_DBS = ["plasmidfinder", "vfdb"]
 fastq_lookup = {fastq_id(f): f for reads in sample_pairs.values() for f in reads.values()}
 file_names = sorted(fastq_lookup)
 
@@ -117,7 +118,7 @@ rule all:
     input:
         expand("fastqc/{file}_fastqc.html", file=file_names),
         expand("results/{sample}/amrfinder.tsv", sample=sample_names),
-        expand("results/{sample}/abricate_plasmidfinder.tsv", sample=sample_names),
+        expand("results/{sample}/abricate_{db}.tsv", sample=sample_names, db=ABRICATE_DBS),
         expand("results/{sample}/prokka/{sample}.gff", sample=sample_names),
         "dataframe/results.csv",
         get_pangenome_outputs,
@@ -257,25 +258,28 @@ rule amrfinder:
             --database "$DB" -o {output.amrfinder} || fail {wildcards.sample} amrfinder {output}
         """
 
-rule abricate_plasmidfinder:
+rule abricate:
     input:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
-        abricate="results/{sample}/abricate_plasmidfinder.tsv"
+        abricate="results/{sample}/abricate_{db}.tsv"
+    wildcard_constraints:
+        db="|".join(ABRICATE_DBS)
     log:
-        "logs/abricate_plasmidfinder/{sample}.log"
+        "logs/abricate_{db}/{sample}.log"
     benchmark:
-        "benchmarks/abricate_plasmidfinder/{sample}.tsv"
+        "benchmarks/abricate_{db}/{sample}.tsv"
     conda:
         "envs/abricate_env.yml"
     shell:
         r"""
         {SHELL_HELPERS}
         exec 2> {log}
-        begin {wildcards.sample} {rule}
-        has_assembly {input.assembly} || {{ skip {wildcards.sample} abricate_plasmidfinder {output}; exit 0; }}
-        abricate --db plasmidfinder {input.assembly} > {output.abricate} \
-            || fail {wildcards.sample} abricate_plasmidfinder {output}
+        STAGE=abricate_{wildcards.db}
+        begin {wildcards.sample} $STAGE
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} $STAGE {output}; exit 0; }}
+        abricate --db {wildcards.db} {input.assembly} > {output.abricate} \
+            || fail {wildcards.sample} $STAGE {output}
         """
 
 rule prokka:
@@ -406,7 +410,7 @@ rule database_versions:
     shell:
         r"""
         mkdir -p dataframe
-        abricate --list 2>/dev/null | awk -F'\t' '$1 == "DATABASE" || $1 == "plasmidfinder"' > {output.db_versions} || true
+        abricate --list 2>/dev/null | awk -F'\t' '$1 == "DATABASE" || $1 == "plasmidfinder" || $1 == "vfdb"' > {output.db_versions} || true
         [[ -s {output.db_versions} ]] || printf 'DATABASE\tSEQUENCES\tDBTYPE\tDATE\nplasmidfinder\t-\t-\tunavailable\n' > {output.db_versions}
         AMR_DB="$(cat {input.amrfinder_db})"
         printf 'amrfinderplus\t-\t-\t%s\n' "$(cat "$AMR_DB/version.txt" 2>/dev/null || echo unavailable)" >> {output.db_versions}
@@ -418,7 +422,7 @@ checkpoint build_dataframe:
         expand("fastqc/{file}_fastqc.zip", file=file_names),
         expand("results/{sample}/shovill/contigs.fa", sample=sample_names),
         expand("results/{sample}/amrfinder.tsv", sample=sample_names),
-        expand("results/{sample}/abricate_plasmidfinder.tsv", sample=sample_names),
+        expand("results/{sample}/abricate_{db}.tsv", sample=sample_names, db=ABRICATE_DBS),
         expand("results/{sample}/mlst.tsv", sample=sample_names),
         expand("results/{sample}/prokka/{sample}.gff", sample=sample_names),
         expand("results/{sample}/quast/report.tsv", sample=sample_names),

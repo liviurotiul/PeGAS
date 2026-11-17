@@ -6,8 +6,8 @@ This is PeGAS, a bioinformatic tool designed for seamless QC, assembly, and anno
 
 - **Quality Control:** FastQC-based QC for Illumina paired-end reads.
 - **Assembly:** De novo assembly using SPAdes (via Shovill).
-- **AMR and virulence:** AMRFinderPlus (`--plus`) for resistance genes, **resistance point mutations** (e.g. gyrA/parC, when the MLST species is supported), virulence and stress genes.
-- **Plasmids:** PlasmidFinder replicon typing (via Abricate).
+- **AMR:** AMRFinderPlus for acquired resistance genes and **resistance point mutations** (e.g. gyrA/parC, when the MLST species is supported).
+- **Virulence and plasmids:** Abricate with VFDB and PlasmidFinder.
 - **Typing and QC:** MLST, QUAST, CheckM2, with a PASS/WARN/FAIL verdict per assembly.
 - **Pangenome:** Prokka + Roary per species (samples without an assigned species are never pooled).
 - **Reports:** Clean, static R HTML report by default, with an optional interactive HTML report.
@@ -141,7 +141,7 @@ options:
 
 ### 6. Reports and GUI
 
-- **Default report:** `report/report_r.html` is a clean, static, shareable HTML report. It starts with interpretation-first sections for sample status, AMR, virulence, plasmids, thresholds, and tool/database versions.
+- **Default report:** `report/report_r.html`, a single self-contained HTML file you can email. It opens with an overview (QC verdicts, which samples carry acquired AMR genes, point mutations, virulence genes and plasmids), followed by the resistome (acquired genes and point mutations side by side), virulome, plasmids, MLST, QC, pangenome and run details.
 - **Interactive report (optional):** add `--interactive` to also generate the older Plotly/Jinja report at `report/report.html`.
 - **GUI:** run `pegas` or `pegas-lite` with no arguments to launch the GUI. It covers the common CLI flags; pick an existing output folder to resume it.
 
@@ -153,7 +153,7 @@ When a run finishes, PeGAS prints a short summary: how many samples passed QC, w
 - `dataframe/pegas_results.xlsx`: one workbook with sample status, assembly QC and the presence/absence matrices.
 - `dataframe/assembly_qc.tsv`: per-sample species, ST, QUAST/CheckM2 metrics and the `QC_STATUS` (PASS/WARN/FAIL) with `QC_NOTES`. FAIL: completeness < 80%, contamination > 10%, N50 < 5 kb or more than 1000 contigs. WARN: completeness < 90%, contamination > 5%, N50 < 20 kb, more than 500 contigs, GC more than 2 points from the species' expected value, or no species assigned.
 - `dataframe/amr_matrix.tsv`, `virulence_matrix.tsv`, `plasmid_matrix.tsv`: sample x gene presence/absence (point mutations appear as e.g. `gyrA_S83L`).
-- `dataframe/results.csv`: every hit, one row each (`PREDICTION_SOURCE` is `AMR`, `Virulence`, `Stress` or `PlasmidFinder`; `ELEMENT_SUBTYPE` is `POINT` for point mutations).
+- `dataframe/results.csv`: every hit, one row each (`PREDICTION_SOURCE` is `AMR`, `VFDB`, `PlasmidFinder`, `Stress` or `AMRFinder_virulence`; `ELEMENT_SUBTYPE` is `POINT` for point mutations).
 - `dataframe/sample_status.tsv`: per-sample status of every step.
 - `dataframe/database_versions.tsv` and `pegas_config.json`: database and tool versions and run parameters.
 - `logs/<step>/<sample>.log` and `benchmarks/<step>/<sample>.tsv` (`pegas`) or `results/<sample>/status/*.log` (`pegas-lite`): tool logs and per-step runtime/memory.
