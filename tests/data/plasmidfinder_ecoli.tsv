@@ -1,0 +1,3 @@
+#FILE	SEQUENCE	START	END	STRAND	GENE	COVERAGE	COVERAGE_MAP	GAPS	%COVERAGE	%IDENTITY	DATABASE	ACCESSION	PRODUCT	RESISTANCE
+results/002/shovill/contigs.fa	contig00016	33752	34751	+	IncFIB(H89-PhagePlasmid)_1	1-1000/1000	===============	0/0	100.00	99.70	plasmidfinder	HG530657	IncFIB(H89-PhagePlasmid)_1__HG530657	
+results/002/shovill/contigs.fa	contig00033	5612	6346	-	IncP1_3	1-735/745	========/======	2/2	98.52	80.30	plasmidfinder	KX377410	IncP1_3__KX377410	

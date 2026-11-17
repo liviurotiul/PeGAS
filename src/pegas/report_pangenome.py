@@ -48,7 +48,7 @@ def create_pangenome_heatmaps(species_dict):
         df_pangenome = df_pangenome.set_index("Gene")
         df_pangenome = df_pangenome.drop(df_pangenome.columns[:13], axis=1)
         # Replace NaN values with 0 and any other value with 1.
-        df_pangenome = df_pangenome.fillna(0).applymap(lambda x: 0 if x == 0 else 1)
+        df_pangenome = (df_pangenome.fillna(0) != 0).astype(int)
         # Transpose the DataFrame so that samples are rows and genes are columns.
         df_pangenome = df_pangenome.T
         # Sort columns by sum.

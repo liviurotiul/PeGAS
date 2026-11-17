@@ -5,12 +5,13 @@ import pandas as pd
 from bs4 import BeautifulSoup as bs
 from tqdm import tqdm
 
+from .common import parse_fastq_read
 from .utils import create_html_widget
 
 
 def create_annotation_tables(df, species_dict):
     """
-    Creates three HTML tables summarizing annotations from NCBI, VFDB, and PlasmidFinder,
+    Creates three HTML tables summarizing annotations from AMRFinderPlus (AMR, virulence) and PlasmidFinder,
     with custom CSS to set the table width to 100%.
 
     Parameters:
@@ -25,8 +26,8 @@ def create_annotation_tables(df, species_dict):
 
     # Define predictors and their corresponding table names.
     predictors = {
-        'NCBI': 'Resistance',
-        'VFDB': 'Virulence',
+        'AMR': 'Resistance',
+        'Virulence': 'Virulence',
         'PlasmidFinder': 'Plasmid'
     }
 
@@ -106,39 +107,15 @@ def create_fastqc_table(df, species_dict, gc_content_dict):
     # Define the strings we're looking for in the FastQC reports.
     search_strings = ["Total Sequences", "Sequences flagged as poor quality", "Sequence length", "%GC"]
 
-    # Function to extract sample name.
-    def get_core_sample_name(filename):
-        """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-        base = os.path.basename(filename)
-        base = base.replace("_fastqc.html", "").replace(".html", "")
-        matches = list(re.finditer(r"R([12])(?=$|[._-])", base, flags=re.IGNORECASE))
-        if matches:
-            sample = base[:matches[-1].start()].rstrip("._-")
-            if sample:
-                return sample
-        base = re.sub(r"\.(fastq|fq)(\.gz)?$", "", base, flags=re.IGNORECASE)
-        return base.rstrip("._-")
-
-    # Function to extract read direction from file path.
-    def get_read_direction_from_file(file_path):
-        base_name = os.path.basename(file_path)
-        match = re.search(r'_R([12])', base_name)
-        if match:
-            return 'R' + match.group(1)
-        else:
-            # Try to infer from the directory structure if not in filename.
-            if 'R1' in file_path or 'read1' in file_path.lower():
-                return 'R1'
-            elif 'R2' in file_path or 'read2' in file_path.lower():
-                return 'R2'
-            else:
-                return None
+    def parse_fastqc_file(path):
+        """(sample, "R1"|"R2"|None) for a FastQC report, using the pipeline's pairing rule."""
+        stem = os.path.basename(path).replace("_fastqc.html", "")
+        return parse_fastq_read(stem + ".fastq") or (stem, None)
 
     # Build a set of unique sample names.
     sample_names = set()
     for file_path in html_files:
-        sample_name = get_core_sample_name(file_path)
-        sample_names.add(sample_name)
+        sample_names.add(parse_fastqc_file(file_path)[0])
 
     # Create the DataFrame with the corrected index.
     df_qc = pd.DataFrame(
@@ -152,8 +129,7 @@ def create_fastqc_table(df, species_dict, gc_content_dict):
         with open(file_path, "r", encoding='utf-8') as f:
             soup = bs(f, "html.parser")
 
-        sample_name = get_core_sample_name(file_path)
-        read_direction = get_read_direction_from_file(file_path)
+        sample_name, read_direction = parse_fastqc_file(file_path)
 
         if read_direction is None:
             tqdm.write(f"Warning: Could not determine read direction for file '{file_path}'. Skipping.")
@@ -200,8 +176,7 @@ def create_fastqc_table(df, species_dict, gc_content_dict):
             # Avoid division by zero and handle missing data.
             total_sequences = df_qc[total_sequences_col].replace(0, pd.NA)
             poor_quality_sequences = df_qc[poor_quality_col]
-            with pd.option_context('mode.use_inf_as_na', True):
-                percentage = (poor_quality_sequences / total_sequences * 100).round(2)
+            percentage = (poor_quality_sequences / total_sequences * 100).round(2)
             # Combine counts and percentages.
             df_qc[poor_quality_col] = poor_quality_sequences.fillna(0).astype(int).astype(str) + ' (' + percentage.fillna(0).astype(str) + '%)'
 
@@ -429,7 +404,7 @@ def generate_virulence_factor_table(df, species_dict):
     - tables (dict): Dictionary with species names as keys and HTML code for tables as values.
     """
     # Filter the DataFrame for virulence factors.
-    df_virulence = df[df['PREDICTION_SOURCE'] == 'VFDB']
+    df_virulence = df[df['PREDICTION_SOURCE'] == 'Virulence']
 
     species = df_virulence['SPECIES'].unique()
 

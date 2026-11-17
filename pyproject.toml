@@ -50,3 +50,7 @@ pegas = [
     "envs/*.yml",
     "envs/*.pin.txt",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

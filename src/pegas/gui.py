@@ -48,9 +48,6 @@ def launch_gui(config_filename="pegas_config.json"):
         roary = config_data.get("roary_cpu_cores")
         if roary is not None:
             roary_var.set(str(roary))
-        overwrite = config_data.get("overwrite")
-        if overwrite is not None:
-            overwrite_var.set(bool(overwrite))
         interactive_report = config_data.get("interactive_report")
         if interactive_report is None:
             interactive_report = config_data.get("html_report")
@@ -185,7 +182,7 @@ def launch_gui(config_filename="pegas_config.json"):
     tk.Entry(root, textvariable=roary_var, width=12).grid(row=row, column=1, sticky="w", padx=8, pady=4)
     row += 1
 
-    tk.Checkbutton(root, text="Overwrite output directory", variable=overwrite_var).grid(row=row, column=1, sticky="w", padx=8, pady=6)
+    tk.Checkbutton(root, text="Start over (delete previous results; otherwise an existing run is resumed)", variable=overwrite_var).grid(row=row, column=1, sticky="w", padx=8, pady=6)
     row += 1
 
     tk.Checkbutton(root, text="Generate interactive HTML report", variable=interactive_report_var).grid(row=row, column=1, sticky="w", padx=8, pady=4)

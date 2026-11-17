@@ -6,37 +6,26 @@ import shutil
 import subprocess
 import sys
 
-import pandas as pd
 from tqdm import tqdm
 
 try:
     from .build_dataframe import build_dataframe
+    from .common import get_core_sample_name, fastq_id, amrfinder_organism, pangenome_groups
     from .main import (
-        build_parser,
-        finalize_arguments,
-        list_fastq_files,
-        get_core_sample_name,
-        build_fastq_pairs,
-        write_sample_manifest,
-        write_run_config,
-        collect_tool_versions,
-        remove_extra_files,
+        build_parser, finalize_arguments, write_sample_manifest, write_run_config,
+        collect_tool_versions, remove_extra_files, resolve_inputs, prepare_output_dir,
+        print_plan, print_run_summary,
     )
 except ImportError:
     package_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     if package_root not in sys.path:
         sys.path.insert(0, package_root)
     from pegas.build_dataframe import build_dataframe
+    from pegas.common import get_core_sample_name, fastq_id, amrfinder_organism, pangenome_groups
     from pegas.main import (
-        build_parser,
-        finalize_arguments,
-        list_fastq_files,
-        get_core_sample_name,
-        build_fastq_pairs,
-        write_sample_manifest,
-        write_run_config,
-        collect_tool_versions,
-        remove_extra_files,
+        build_parser, finalize_arguments, write_sample_manifest, write_run_config,
+        collect_tool_versions, remove_extra_files, resolve_inputs, prepare_output_dir,
+        print_plan, print_run_summary,
     )
 
 
@@ -49,6 +38,7 @@ ENV_DIR = os.path.join(os.path.expanduser("~"), ".pegas", "envs")
 ENV_SPECS = {
     "fastqc": "fastqc_env.yml",
     "shovill": "shovill_env.yml",
+    "amrfinder": "amrfinder_env.yml",
     "abricate": "abricate_env.yml",
     "mlst": "mlst_env.yml",
     "prokka": "prokka_env.yml",
@@ -64,6 +54,9 @@ CONDA_PLATFORM = None
 # attempted and failed (so we skip CheckM2 without retrying every sample).
 CHECKM2_DB = None
 CHECKM2_DB_DIR = os.path.join(os.path.expanduser("~"), ".pegas", "checkm2_db")
+# Same convention for the AMRFinderPlus database ("latest" symlink made by amrfinder_update).
+AMRFINDER_DB = None
+AMRFINDER_DB_DIR = os.environ.get("AMRFINDER_DB_DIR") or os.path.join(os.path.expanduser("~"), ".pegas", "amrfinder_db")
 ROARY_FALLBACK_SPECS = [
     "roary=3.13.0",
     "roary=3.13",
@@ -383,9 +376,18 @@ def status_dir(work_dir, sample):
     return path
 
 
+def clear_stage_status(work_dir, sample, stage):
+    """Forget status markers left by earlier attempts at this stage."""
+    folder = status_dir(work_dir, sample)
+    for name in os.listdir(folder):
+        if name.startswith(f"{stage}.") and name.endswith(".txt"):
+            os.remove(os.path.join(folder, name))
+
+
 def stage_log_path(work_dir, sample, stage):
-    # Lives next to the status markers. Ends in .log (not .txt) so it is not
-    # picked up by the status-marker parser in build_dataframe.
+    # Called when a stage starts. The log lives next to the status markers and
+    # ends in .log (not .txt) so the marker parser in build_dataframe skips it.
+    clear_stage_status(work_dir, sample, stage)
     return os.path.join(status_dir(work_dir, sample), f"{stage}.log")
 
 
@@ -401,6 +403,7 @@ def log_tail(log_path, max_lines=25):
 
 
 def write_stage_status(work_dir, sample, stage, status, message):
+    clear_stage_status(work_dir, sample, stage)
     path = os.path.join(status_dir(work_dir, sample), f"{stage}.{status}.txt")
     with open(path, "w") as f:
         f.write(message.rstrip() + "\n")
@@ -442,7 +445,7 @@ def run_fastqc(fastq_files, work_dir, failure_policy="stop"):
     ensure_dir(fastqc_dir)
 
     for fastq in tqdm(fastq_files, desc="FastQC"):
-        file_id = os.path.basename(fastq).replace(".fastq.gz", "")
+        file_id = fastq_id(fastq)
         html_path = os.path.join(fastqc_dir, f"{file_id}_fastqc.html")
         zip_path = os.path.join(fastqc_dir, f"{file_id}_fastqc.zip")
         if os.path.exists(html_path) and os.path.exists(zip_path):
@@ -533,6 +536,48 @@ def run_mlst(sample_names, work_dir, failure_policy="stop"):
             if os.path.exists(output):
                 os.remove(output)
             handle_tool_failure(work_dir, sample, "mlst", exc, failure_policy, log_path=log_path)
+
+
+def ensure_amrfinder_db():
+    """Return the cached AMRFinderPlus database folder, downloading it once if needed."""
+    global AMRFINDER_DB
+    latest = os.path.join(AMRFINDER_DB_DIR, "latest")
+    if AMRFINDER_DB is None and not os.path.isfile(os.path.join(latest, "version.txt")):
+        tqdm.write("[pegas] Downloading AMRFinderPlus database (one-time) ...")
+        try:
+            run_command(["amrfinder_update", "--database", AMRFINDER_DB_DIR], cwd=os.getcwd(), env_name="amrfinder")
+        except subprocess.CalledProcessError:
+            pass
+    if os.path.isfile(os.path.join(latest, "version.txt")):
+        AMRFINDER_DB = latest
+        return AMRFINDER_DB
+    AMRFINDER_DB = ""
+    raise subprocess.CalledProcessError(1, ["amrfinder_update"], "AMRFinderPlus database unavailable")
+
+
+def run_amrfinder(sample_names, amrfinder_cpus, work_dir, failure_policy="stop"):
+    for sample in tqdm(sample_names, desc="AMRFinderPlus"):
+        sample_dir = os.path.join(work_dir, "results", sample)
+        output = os.path.join(sample_dir, "amrfinder.tsv")
+        assembly = os.path.join(sample_dir, "shovill", "contigs.fa")
+        if os.path.exists(output):
+            continue
+        if not valid_assembly(assembly):
+            write_stage_status(work_dir, sample, "amrfinder", "skipped",
+                               f"AMRFinderPlus skipped for {sample}: valid assembly not found.")
+            continue
+        log_path = stage_log_path(work_dir, sample, "amrfinder")
+        try:
+            cmd = ["amrfinder", "-n", assembly, "--plus", "--threads", str(amrfinder_cpus),
+                   "--database", ensure_amrfinder_db(), "-o", output]
+            organism = amrfinder_organism(os.path.join(sample_dir, "mlst.tsv"))
+            if organism:
+                cmd += ["--organism", organism]
+            run_command(cmd, cwd=work_dir, env_name="amrfinder", log_path=log_path)
+        except subprocess.CalledProcessError as exc:
+            if os.path.exists(output):
+                os.remove(output)
+            handle_tool_failure(work_dir, sample, "amrfinder", exc, failure_policy, log_path=log_path)
 
 
 def run_prokka(sample_names, prokka_cpus, work_dir, failure_policy="stop"):
@@ -752,6 +797,7 @@ def distribute_checkm2_results(output_dir, targets, work_dir):
 
     for sample, _ in targets:
         if sample in rows_by_sample:
+            clear_stage_status(work_dir, sample, "checkm2")
             sample_dir = os.path.join(work_dir, "results", sample, "checkm2")
             ensure_dir(sample_dir)
             with open(os.path.join(sample_dir, "quality_report.tsv"), "w") as fh:
@@ -780,21 +826,20 @@ def link_gff(src_gff, dest_gff):
 
 
 def run_roary(roary_cpus, work_dir):
-    df = pd.read_csv(os.path.join(work_dir, "dataframe", "results.csv"), dtype={"SAMPLE": str})
-    df_grouped = df.groupby("SPECIES")["SAMPLE"].nunique().reset_index()
-    eligible_species = df_grouped.loc[df_grouped["SAMPLE"] > 1, "SPECIES"].tolist()
-    if not eligible_species:
+    groups = pangenome_groups(os.path.join(work_dir, "dataframe", "results.csv"))
+    pangenome_dir = os.path.join(work_dir, "pangenome")
+    ensure_dir(pangenome_dir)
+    for stale in set(os.listdir(pangenome_dir)) - set(groups):  # e.g. an old unassigned-species group
+        shutil.rmtree(os.path.join(pangenome_dir, stale), ignore_errors=True)
+    if not groups:
         tqdm.write("[pegas] No species eligible for Roary.")
         return
 
-    ensure_dir(os.path.join(work_dir, "pangenome"))
-
-    for species in tqdm(eligible_species, desc="Roary"):
+    for species, samples in tqdm(groups.items(), desc="Roary"):
         species_dir = os.path.join(work_dir, "pangenome", species)
         ensure_dir(species_dir)
         output_dir = os.path.join(species_dir, "output")
 
-        samples = df.loc[df["SPECIES"] == species, "SAMPLE"].unique().tolist()
         for sample in samples:
             src_gff = os.path.join(work_dir, "results", sample, "prokka", f"{sample}.gff")
             if not os.path.isfile(src_gff) or os.path.getsize(src_gff) == 0:
@@ -882,25 +927,30 @@ def run_r_report(data_dir, output_dir, work_dir, interactive_report=False):
         raise
 
 
-def write_abricate_database_versions(work_dir):
+def write_database_versions(work_dir):
+    """PlasmidFinder (abricate) and AMRFinderPlus database versions, in abricate --list format."""
     ensure_dir(os.path.join(work_dir, "dataframe"))
     output = os.path.join(work_dir, "dataframe", "database_versions.tsv")
     env_path = ensure_env("abricate")
     cmd = ["conda", "run", "-p", env_path, "--no-capture-output", "abricate", "--list"]
     result = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True, check=False)
-    if result.returncode == 0 and result.stdout.strip():
-        with open(output, "w") as f:
-            f.write(result.stdout)
-    else:
-        with open(output, "w") as f:
-            f.write("DATABASE\tSTATUS\tMESSAGE\n")
-            message = (result.stderr or result.stdout or "abricate --list failed").strip().replace("\n", " ")
-            f.write(f"abricate\tunavailable\t{message}\n")
+    lines = result.stdout.splitlines() if result.returncode == 0 else []
+    rows = [line for line in lines if line.split("\t")[0] in ("DATABASE", "plasmidfinder")]
+    if not rows:
+        rows = ["DATABASE\tSEQUENCES\tDBTYPE\tDATE", "plasmidfinder\t-\t-\tunavailable"]
+    try:
+        with open(os.path.join(AMRFINDER_DB_DIR, "latest", "version.txt")) as fh:
+            amr_version = fh.read().strip()
+    except OSError:
+        amr_version = "unavailable"
+    rows.append(f"amrfinderplus\t-\t-\t{amr_version}")
+    with open(output, "w") as f:
+        f.write("\n".join(rows) + "\n")
     return output
 
 
 def required_envs_for_run(args):
-    envs = ["fastqc", "shovill", "abricate", "mlst", "prokka", "quast", "checkm2", "roary"]
+    envs = ["fastqc", "shovill", "amrfinder", "abricate", "mlst", "prokka", "quast", "checkm2", "roary"]
     if getattr(args, "simple_report", True):
         envs.append("report_r")
     return envs
@@ -912,35 +962,12 @@ def ensure_required_envs(args):
 
 
 def run_pipeline(args):
-    data_dir = os.path.abspath(os.path.expanduser(args.data))
-    output_dir = os.path.abspath(os.path.expanduser(args.output))
+    data_dir, output_dir, fastq_files, sample_pairs = resolve_inputs(args)
+    mode = prepare_output_dir(output_dir, args.overwrite, dry_run=args.dry_run)
+    if args.dry_run:
+        print_plan(args, mode, data_dir, output_dir, sample_pairs)
+        return
     ensure_conda_available()
-
-    if getattr(args, "lite_mode", False):
-        opts = vars(args)
-        ordered_keys = sorted(opts.keys())
-        tqdm.write("[pegas] pegas-lite options:")
-        for key in ordered_keys:
-            tqdm.write(f"[pegas]   {key}={opts[key]}")
-
-    if not os.path.isdir(data_dir):
-        tqdm.write(f"[pegas] Input directory not found: {data_dir}")
-        sys.exit(1)
-
-    fastq_files = list_fastq_files(data_dir)
-    if not fastq_files:
-        tqdm.write(f"[pegas] No .fastq.gz files found in: {data_dir}")
-        sys.exit(1)
-
-    sample_pairs = build_fastq_pairs(fastq_files)
-    if not sample_pairs:
-        tqdm.write("[pegas] No valid R1/R2 pairs found in the input folder.")
-        sys.exit(1)
-
-    if os.path.exists(output_dir) and not args.overwrite:
-        tqdm.write("[pegas]Output directory already exists. Use --overwrite to overwrite it or specify a different directory.")
-        sys.exit(1)
-    ensure_dir(output_dir)
 
     if getattr(args, "lite_mode", False):
         purge_empty_spades(output_dir)
@@ -958,16 +985,14 @@ def run_pipeline(args):
     run_fastqc(fastq_files, work_dir, failure_policy=failure_policy)
     run_shovill(sample_pairs, args.shovill_cpu_cores, args.shovill_ram, work_dir, failure_policy=failure_policy)
     sample_names = sorted(sample_pairs.keys())
-    run_abricate(sample_names, work_dir, "ncbi", failure_policy=failure_policy)
-    run_abricate(sample_names, work_dir, "plasmidfinder", failure_policy=failure_policy)
-    run_abricate(sample_names, work_dir, "vfdb", failure_policy=failure_policy)
     run_mlst(sample_names, work_dir, failure_policy=failure_policy)
+    run_amrfinder(sample_names, args.amrfinder_cpu_cores, work_dir, failure_policy=failure_policy)
+    run_abricate(sample_names, work_dir, "plasmidfinder", failure_policy=failure_policy)
     run_prokka(sample_names, args.prokka_cpu_cores, work_dir, failure_policy=failure_policy)
-    run_quast(sample_names, getattr(args, "quast_cpu_cores", None) or args.cores, work_dir, failure_policy=failure_policy)
-    run_checkm2(sample_names, getattr(args, "checkm2_cpu_cores", None) or args.cores, work_dir, failure_policy=failure_policy)
+    run_quast(sample_names, args.quast_cpu_cores, work_dir, failure_policy=failure_policy)
+    run_checkm2(sample_names, args.checkm2_cpu_cores, work_dir, failure_policy=failure_policy)
 
-    ensure_dir(os.path.join(work_dir, "dataframe"))
-    write_abricate_database_versions(work_dir)
+    write_database_versions(work_dir)
     current_dir = os.getcwd()
     try:
         os.chdir(work_dir)
@@ -982,8 +1007,7 @@ def run_pipeline(args):
     finally:
         os.chdir(current_dir)
 
-    tool_versions = collect_tool_versions([ENV_DIR])
-    write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
+    print_run_summary(output_dir)
 
 
 def main(argv=None):

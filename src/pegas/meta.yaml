@@ -48,6 +48,7 @@ outputs:
         - matplotlib-base >=3.9.2
         - networkx >=3.2
         - beautifulsoup4 >=4.12.3
+        - openpyxl
         - numpy
 
     test:

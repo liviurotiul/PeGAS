@@ -186,7 +186,7 @@ parse_fastq_read <- function(filename) {
     return(NULL)
   }
   stem <- sub("\\\\.(fastq|fq)(\\\\.gz)?$", "", base, ignore.case = TRUE)
-  matches <- gregexpr("R([12])(?=$|[._-])", stem, perl = TRUE, ignore.case = TRUE)
+  matches <- gregexpr("(?:R|(?<=[._-]))([12])(?=$|[._-])", stem, perl = TRUE, ignore.case = TRUE)
   positions <- matches[[1]]
   if (length(positions) == 0 || positions[1] == -1) {
     return(NULL)
@@ -309,14 +309,14 @@ config_path <- if (!is.null(params$output_dir) && params$output_dir != "") {
 
 sample_status <- NULL
 if (file.exists(sample_status_path)) {
-  sample_status <- read.delim(sample_status_path, stringsAsFactors = FALSE, check.names = FALSE)
+  sample_status <- read.delim(sample_status_path, stringsAsFactors = FALSE, check.names = FALSE, colClasses = "character")
 }
 
 assembly_qc <- NULL
 assembly_qc_summary_path <- file.path(dataframe_dir, "assembly_qc.tsv")
 if (file.exists(assembly_qc_summary_path)) {
   assembly_qc <- tryCatch(
-    read.delim(assembly_qc_summary_path, stringsAsFactors = FALSE, check.names = FALSE),
+    read.delim(assembly_qc_summary_path, stringsAsFactors = FALSE, check.names = FALSE, colClasses = "character"),
     error = function(e) NULL
   )
 }
@@ -332,7 +332,7 @@ if (file.exists(config_path)) {
   run_config <- tryCatch(jsonlite::fromJSON(config_path), error = function(e) list())
 }
 
-annotation_sources <- c("NCBI", "VFDB", "PlasmidFinder")
+annotation_sources <- c("AMR", "Virulence", "PlasmidFinder")
 annotation_hits <- NULL
 if (!is.null(annotation_df) && "PREDICTION_SOURCE" %in% names(annotation_df)) {
   annotation_hits <- annotation_df[
@@ -372,17 +372,35 @@ count_source_samples <- function(source) {
   length(unique(annotation_hits$SAMPLE[annotation_hits$PREDICTION_SOURCE == source]))
 }
 
-amr_samples <- count_source_samples("NCBI")
-vir_samples <- count_source_samples("VFDB")
+amr_samples <- count_source_samples("AMR")
+vir_samples <- count_source_samples("Virulence")
+point_samples <- if (!is.null(annotation_hits) && "ELEMENT_SUBTYPE" %in% names(annotation_hits)) {
+  length(unique(annotation_hits$SAMPLE[annotation_hits$PREDICTION_SOURCE == "AMR" & startsWith(annotation_hits$ELEMENT_SUBTYPE, "POINT")]))
+} else {
+  0
+}
 plasmid_samples <- count_source_samples("PlasmidFinder")
 review_items <- c(
   review_items,
-  paste0("AMR hits: ", amr_samples, " sample(s) with NCBI resistance annotations."),
-  paste0("Virulence hits: ", vir_samples, " sample(s) with VFDB annotations."),
+  paste0("AMR hits: ", amr_samples, " sample(s) with AMRFinderPlus resistance calls (", point_samples, " with resistance point mutations)."),
+  paste0("Virulence hits: ", vir_samples, " sample(s) with AMRFinderPlus virulence genes."),
   paste0("Plasmid hits: ", plasmid_samples, " sample(s) with PlasmidFinder annotations.")
 )
 
-if (!is.null(assembly_qc) && nrow(assembly_qc) > 0 &&
+if (!is.null(assembly_qc) && nrow(assembly_qc) > 0 && "QC_STATUS" %in% names(assembly_qc)) {
+  verdicts <- as.character(assembly_qc$QC_STATUS)
+  review_items <- c(review_items, paste0(
+    "Assembly QC: ", sum(verdicts == "PASS"), " PASS, ", sum(verdicts == "WARN"), " WARN, ",
+    sum(verdicts == "FAIL"), " FAIL (CheckM2 completeness/contamination, N50, contig count, GC vs species)."
+  ))
+  flagged <- which(verdicts %in% c("WARN", "FAIL"))
+  for (i in head(flagged, 8)) {
+    review_items <- c(review_items, paste0("QC ", verdicts[i], ": ", assembly_qc$SAMPLE[i], " (", assembly_qc$QC_NOTES[i], ")."))
+  }
+  if (length(flagged) > 8) {
+    review_items <- c(review_items, paste0("... and ", length(flagged) - 8, " more QC flag(s) in the Assembly QC table."))
+  }
+} else if (!is.null(assembly_qc) && nrow(assembly_qc) > 0 &&
     all(c("COMPLETENESS", "CONTAMINATION") %in% names(assembly_qc))) {
   completeness <- suppressWarnings(as.numeric(assembly_qc$COMPLETENESS))
   contamination <- suppressWarnings(as.numeric(assembly_qc$CONTAMINATION))
@@ -423,7 +441,7 @@ if (is.null(sample_status) || nrow(sample_status) == 0) {
   # Shorten the redundant ABRICATE_* headers for display so the 11-column
   # table fits (the underscore-joined names are otherwise unbreakable).
   display_status <- sample_status
-  rename_map <- c(ABRICATE_NCBI = "NCBI", ABRICATE_PLASMIDFINDER = "PlasmidFinder", ABRICATE_VFDB = "VFDB")
+  rename_map <- c(AMRFINDER = "AMRFinderPlus", PLASMIDFINDER = "PlasmidFinder", ABRICATE_NCBI = "NCBI", ABRICATE_PLASMIDFINDER = "PlasmidFinder", ABRICATE_VFDB = "VFDB")
   for (old_name in names(rename_map)) {
     names(display_status)[names(display_status) == old_name] <- rename_map[[old_name]]
   }
@@ -439,7 +457,7 @@ if (is.null(annotation_hits) || nrow(annotation_hits) == 0) {
   cat("No AMR, virulence, or plasmid hits were reported.\n")
 } else {
   source_labels <- data.frame(
-    PREDICTION_SOURCE = c("NCBI", "VFDB", "PlasmidFinder"),
+    PREDICTION_SOURCE = c("AMR", "Virulence", "PlasmidFinder"),
     Category = c("AMR", "Virulence", "Plasmid"),
     stringsAsFactors = FALSE
   )
@@ -463,8 +481,8 @@ if (is.null(annotation_hits) || nrow(annotation_hits) == 0) {
     subset <- annotation_hits[annotation_hits$SAMPLE == sample, , drop = FALSE]
     data.frame(
       Sample = sample,
-      AMRGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "NCBI"])),
-      VirulenceGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "VFDB"])),
+      AMRGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "AMR"])),
+      VirulenceGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "Virulence"])),
       PlasmidGenes = length(unique(subset$GENE[subset$PREDICTION_SOURCE == "PlasmidFinder"])),
       stringsAsFactors = FALSE
     )
@@ -499,10 +517,10 @@ if (file.exists(database_versions_path)) {
   if (!is.null(db_versions) && nrow(db_versions) > 0) {
     cat(render_searchable_table(render_df_table(db_versions, "database-version-table", "samples-table"), "database-version-table", "Database versions"))
   } else {
-    cat("Abricate database versions could not be parsed.\n")
+    cat("Database versions could not be parsed.\n")
   }
 } else {
-  cat("Abricate database version table was not found.\n")
+  cat("Database version table was not found.\n")
 }
 ```
 
@@ -602,7 +620,7 @@ strip_suffix <- function(value, suffix) {
 
 get_core_sample_name <- function(filename) {
   base <- trimws(basename(filename))
-  matches <- gregexpr("R([12])(?=$|[._-])", base, perl = TRUE, ignore.case = TRUE)
+  matches <- gregexpr("(?:R|(?<=[._-]))([12])(?=$|[._-])", base, perl = TRUE, ignore.case = TRUE)
   positions <- matches[[1]]
   if (length(positions) > 0 && positions[1] != -1) {
     last_pos <- tail(positions, 1)
@@ -1028,7 +1046,7 @@ assembly_df <- NULL
 # Preferred source: the QUAST + CheckM2 summary produced by build_dataframe.
 if (assembly_qc_path != "" && file.exists(assembly_qc_path)) {
   aq <- tryCatch(
-    read.delim(assembly_qc_path, stringsAsFactors = FALSE, check.names = FALSE),
+    read.delim(assembly_qc_path, stringsAsFactors = FALSE, check.names = FALSE, colClasses = "character"),
     error = function(e) NULL
   )
   if (!is.null(aq) && nrow(aq) > 0 && "SAMPLE" %in% names(aq)) {
@@ -1046,6 +1064,8 @@ if (assembly_qc_path != "" && file.exists(assembly_qc_path)) {
       GC = num_col("GC_PERCENT"),
       Completeness = num_col("COMPLETENESS"),
       Contamination = num_col("CONTAMINATION"),
+      QC = if ("QC_STATUS" %in% names(aq)) as.character(aq$QC_STATUS) else NA_character_,
+      QCNotes = if ("QC_NOTES" %in% names(aq)) as.character(aq$QC_NOTES) else "",
       stringsAsFactors = FALSE
     )
     assembly_df <- assembly_df[!is.na(assembly_df$GenomeLength) | !is.na(assembly_df$N50), , drop = FALSE]
@@ -1127,8 +1147,8 @@ if (is.null(assembly_df) || nrow(assembly_df) == 0) {
   # CheckM2 quality flags: completeness should be high, contamination low.
   completeness_class <- function(x) {
     if (is.na(x)) return("")
-    if (x < 90) return("qc-flag-bad")
-    if (x < 95) return("qc-flag-warn")
+    if (x < 80) return("qc-flag-bad")
+    if (x < 90) return("qc-flag-warn")
     "qc-flag-ok"
   }
   contamination_class <- function(x) {
@@ -1139,6 +1159,8 @@ if (is.null(assembly_df) || nrow(assembly_df) == 0) {
   }
 
   has_checkm2 <- any(!is.na(assembly_df$Completeness)) || any(!is.na(assembly_df$Contamination))
+  has_qc <- "QC" %in% names(assembly_df) && any(!is.na(assembly_df$QC))
+  qc_class <- c(PASS = "qc-flag-ok", WARN = "qc-flag-warn", FAIL = "qc-flag-bad")
   ordered <- assembly_df[order(as.character(assembly_df$Species), assembly_df$Sample), , drop = FALSE]
 
   table_rows <- vapply(seq_len(nrow(ordered)), function(i) {
@@ -1160,6 +1182,14 @@ if (is.null(assembly_df) || nrow(assembly_df) == 0) {
         "<td class=\"num-cell ", contamination_class(ordered$Contamination[i]), "\">", fmt_pct(ordered$Contamination[i]), "</td>"
       )
     }
+    if (has_qc) {
+      verdict <- ordered$QC[i]
+      row <- paste0(
+        row,
+        "<td class=\"", if (!is.na(verdict) && verdict %in% names(qc_class)) qc_class[[verdict]] else "", "\" title=\"",
+        escape_html_assembly(ordered$QCNotes[i]), "\">", escape_html_assembly(verdict), "</td>"
+      )
+    }
     paste0(row, "</tr>")
   }, character(1))
 
@@ -1176,6 +1206,9 @@ if (is.null(assembly_df) || nrow(assembly_df) == 0) {
   if (has_checkm2) {
     header <- paste0(header, "<th>Completeness</th>", "<th>Contamination</th>")
   }
+  if (has_qc) {
+    header <- paste0(header, "<th>QC</th>")
+  }
 
   table_html <- paste0(
     "<table id=\"assembly-table\" class=\"assembly-table\">",
@@ -1185,7 +1218,10 @@ if (is.null(assembly_df) || nrow(assembly_df) == 0) {
   )
   cat(render_searchable_table(table_html, "assembly-table", "Assembly QC table"))
   if (has_checkm2) {
-    cat("<p class=\"muted\">Completeness and contamination are CheckM2 estimates. Cells are flagged when completeness &lt; 95% or contamination &gt; 5% (red below 90% / above 10%).</p>")
+    cat("<p class=\"muted\">Completeness and contamination are CheckM2 estimates. Cells are flagged when completeness &lt; 90% or contamination &gt; 5% (red below 80% / above 10%).</p>")
+  }
+  if (has_qc) {
+    cat("<p class=\"muted\">QC verdict: FAIL when completeness &lt; 80%, contamination &gt; 10%, N50 &lt; 5 kb or more than 1000 contigs; WARN when completeness &lt; 90%, contamination &gt; 5%, N50 &lt; 20 kb, more than 500 contigs, GC more than 2 points from the species' expected value, or no species assigned. Hover a verdict for the reason. The same values are in <code>dataframe/assembly_qc.tsv</code>.</p>")
   }
 }
 ```
@@ -1511,7 +1547,7 @@ if (!is.null(params$dataframe_csv) && file.exists(params$dataframe_csv)) {
 if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
   cat("No virulence data found.\n")
 } else {
-  vir_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "VFDB", , drop = FALSE]
+  vir_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "Virulence", , drop = FALSE]
   vir_df <- vir_df[, setdiff(names(vir_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
   if (nrow(vir_df) == 0) {
     cat("No virulence data found.\n")
@@ -1530,7 +1566,7 @@ if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) 
 if (is.null(df_annotations) || !"PREDICTION_SOURCE" %in% names(df_annotations)) {
   cat("No resistance data found.\n")
 } else {
-  res_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "NCBI", , drop = FALSE]
+  res_df <- df_annotations[df_annotations$PREDICTION_SOURCE == "AMR", , drop = FALSE]
   res_df <- res_df[, setdiff(names(res_df), c("CONTIG_LENGTH", "CONTIG_COVERAGE", "CONTIG_NUMBER", "PREDICTION_SOURCE")), drop = FALSE]
   if (nrow(res_df) == 0) {
     cat("No resistance data found.\n")

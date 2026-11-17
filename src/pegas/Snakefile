@@ -1,40 +1,34 @@
 import os
-import re
-import shutil
 import json
 import sys
-import pandas as pd
 import warnings
-
-from glob import glob
-from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
-READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
 
 # Load configuration variables
 raw_data_path = config.get("raw_data", "raw_data")
 sample_manifest_path = config.get("sample_manifest", None)
-list_of_samples = config.get("samples", None)
 install_path = config.get("install_path", None) or os.path.dirname(os.path.realpath(__file__))
 shovill_cpus = config.get("shovill_cpu_cores", 1)
 shovill_ram = config.get("shovill_ram", None)
 shovill_ram_flag = f"--ram {shovill_ram}" if shovill_ram else ""
 prokka_cpus = config.get("prokka_cpu_cores", 1)
+amrfinder_cpus = config.get("amrfinder_cpu_cores", 1)
 quast_cpus = config.get("quast_cpu_cores", 1)
 checkm2_cpus = config.get("checkm2_cpu_cores", 1)
 roary_cpus = config.get("roary_cpu_cores", 1)
 work_directory = config.get("output_dir", None)
-simple_report = config.get("simple_report", config.get("r_report", True))
-if isinstance(simple_report, str):
-    simple_report = simple_report.lower() in ("1", "true", "yes", "y")
-interactive_report = config.get("interactive_report", config.get("html_report", False))
-if isinstance(interactive_report, str):
-    interactive_report = interactive_report.lower() in ("1", "true", "yes", "y")
-failure_policy = config.get("on_tool_failure", "stop")
-if isinstance(failure_policy, str):
-    failure_policy = failure_policy.lower()
+
+
+def config_flag(*keys, default):
+    value = next((config[k] for k in keys if k in config), default)
+    return value.lower() in ("1", "true", "yes", "y") if isinstance(value, str) else bool(value)
+
+
+simple_report = config_flag("simple_report", "r_report", default=True)
+interactive_report = config_flag("interactive_report", "html_report", default=False)
+failure_policy = str(config.get("on_tool_failure", "stop")).lower()
 if failure_policy not in ("stop", "warn"):
     failure_policy = "stop"
 
@@ -55,122 +49,80 @@ if package_root not in sys.path:
     sys.path.insert(0, package_root)
 
 from pegas.build_dataframe import build_dataframe
-# ================= Utility Functions =================
-
-def list_fastq_files(path):
-    """Returns a list of all .fastq.gz files in the specified path."""
-    full_path = os.path.abspath(os.path.expanduser(path))
-    return [f for f in glob(os.path.join(full_path, "*.fastq.gz"))]
-
-def parse_fastq_read(filename):
-    base = os.path.basename(filename)
-    if not base.endswith(".fastq.gz"):
-        return None
-    stem = base[:-9]
-    matches = list(READ_TOKEN_RE.finditer(stem))
-    if not matches:
-        return None
-    match = matches[-1]
-    sample = stem[:match.start()].rstrip("._-")
-    if not sample:
-        return None
-    return sample, f"R{match.group(1)}"
-
-def get_core_sample_name(filename):
-    """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-    parsed = parse_fastq_read(filename)
-    if parsed:
-        return parsed[0]
-    base = os.path.basename(filename)
-    if base.endswith(".fastq.gz"):
-        return base[:-9]
-    return os.path.splitext(base)[0]
-
-def build_fastq_pairs(fastq_files):
-    """Pairs R1 and R2 files based on sample names."""
-    pairs = {}
-    unmatched = []
-    for file in fastq_files:
-        parsed = parse_fastq_read(file)
-        if not parsed:
-            unmatched.append(file)
-            continue
-        sample, read = parsed
-        if sample not in pairs:
-            pairs[sample] = {}
-        pairs[sample][read] = file
-    orphan_samples = sorted([
-        sample for sample, reads in pairs.items()
-        if "R1" not in reads or "R2" not in reads
-    ])
-    if unmatched:
-        preview = ", ".join(os.path.basename(f) for f in unmatched[:5])
-        more = f" (+{len(unmatched) - 5} more)" if len(unmatched) > 5 else ""
-        tqdm.write(f"[pegas] Warning: {len(unmatched)} FASTQ files did not match the R1/R2 pattern: {preview}{more}")
-    if orphan_samples:
-        preview = ", ".join(orphan_samples[:5])
-        more = f" (+{len(orphan_samples) - 5} more)" if len(orphan_samples) > 5 else ""
-        tqdm.write(f"[pegas] Warning: {len(orphan_samples)} samples missing R1 or R2: {preview}{more}")
-    # Filter out incomplete pairs
-    return {s: p for s, p in pairs.items() if "R1" in p and "R2" in p}
-
+from pegas.common import list_fastq_files, build_fastq_pairs, fastq_id, amrfinder_organism, pangenome_groups
 
 # ================= Data Preparation =================
 
 if sample_manifest_path and os.path.exists(sample_manifest_path):
     with open(sample_manifest_path, "r") as f:
-        sample_manifest = json.load(f)
-    fastq_files = sample_manifest.get("fastq_files", [])
-    sample_pairs = sample_manifest.get("sample_pairs", {})
+        sample_pairs = json.load(f).get("sample_pairs", {})
 else:
-    fastq_files = list_fastq_files(raw_data_path)
-    sample_pairs = build_fastq_pairs(fastq_files)
+    sample_pairs = build_fastq_pairs(list_fastq_files(raw_data_path))
 
-file_names = [os.path.basename(f).replace(".fastq.gz", "") for f in fastq_files]
-sample_names = list(sample_pairs.keys())
-fastq_lookup = {os.path.basename(f).replace(".fastq.gz", ""): f for f in fastq_files}
+sample_names = sorted(sample_pairs)
+fastq_lookup = {fastq_id(f): f for reads in sample_pairs.values() for f in reads.values()}
+file_names = sorted(fastq_lookup)
+
+# Bash helpers prepended to the per-sample tool rules. With --on-tool-failure warn,
+# a failing tool records a status marker and leaves empty outputs so the run continues.
+SHELL_HELPERS = r"""
+# GNU parallel (used by prokka) aborts its jobs when no shell is exported.
+export SHELL="${SHELL:-/bin/bash}" PARALLEL_SHELL="${PARALLEL_SHELL:-${SHELL:-/bin/bash}}"
+mark() {  # mark <sample> <stage> <skipped|failed> <message>
+    mkdir -p "results/$1/status"; echo "$4" > "results/$1/status/$2.$3.txt"
+}
+has_assembly() { [[ -s "$1" ]] && grep -q '^>' "$1"; }
+empty_outputs() {  # truncate outputs, but keep existing logs
+    local f
+    for f in "$@"; do
+        mkdir -p "$(dirname "$f")"
+        if [[ "$f" == *.log && -e "$f" ]]; then continue; fi
+        : > "$f"
+    done
+}
+skip() {  # skip <sample> <stage> <outputs...>
+    mark "$1" "$2" skipped "$2 skipped for $1: valid assembly not found."
+    shift 2; empty_outputs "$@"
+}
+begin() {  # begin <sample> <stage>: forget status markers from earlier attempts
+    rm -f "results/$1/status/$2".*.txt
+}
+fail() {  # fail <sample> <stage> <outputs...>
+    mark "$1" "$2" failed "$2 failed for $1 (see logs/$2/$1.log)"
+    echo "[pegas] $2 failed for $1" >&2
+    if [[ "FAILURE_POLICY" != warn ]]; then exit 1; fi
+    shift 2; empty_outputs "$@"
+}
+""".replace("FAILURE_POLICY", failure_policy)
 
 # ================= Snakemake Workflow =================
 
+def get_pangenome_prokka_outputs(wildcards):
+    df_output = checkpoints.build_dataframe.get().output.dataframe
+    return [f"results/{s}/prokka/{s}.gff" for samples in pangenome_groups(df_output).values() for s in samples]
+
+
+def get_pangenome_outputs(wildcards):
+    groups = pangenome_groups(checkpoints.build_dataframe.get().output.dataframe)
+    checkpoints.pangenome.get()
+    outputs = []
+    for sp in groups:
+        files = [f"pangenome/{sp}/output/gene_presence_absence.csv", f"pangenome/{sp}/output/summary_statistics.txt"]
+        if all(os.path.exists(f) for f in files):
+            outputs.extend(files)
+    return outputs
+
+
 rule all:
     input:
-        html=expand("fastqc/{file}_fastqc.html", file=file_names),
-        html_zip=expand("fastqc/{file}_fastqc.zip", file=file_names),
-        shovill=expand(
-            "results/{sample}/shovill/contigs.fa",
-            sample=sample_pairs.keys()
-        ),
-        abricate_ncbi=expand(
-            "results/{sample}/abricate_ncbi.tsv",
-            sample=sample_pairs.keys()
-        ),
-        abricate_plasmidfinder=expand(
-            "results/{sample}/abricate_plasmidfinder.tsv",
-            sample=sample_pairs.keys()
-        ),
-        abricate_vfdb=expand(
-            "results/{sample}/abricate_vfdb.tsv",
-            sample=sample_pairs.keys()
-        ),
-        mlst=expand(
-            "results/{sample}/mlst.tsv",
-            sample=sample_pairs.keys()
-        ),
-        dataframe="dataframe/results.csv",
-        prokka=expand(
-            "results/{sample}/prokka/{sample}.gff",
-            sample=sample_pairs.keys()
-        ),
-        quast=expand(
-            "results/{sample}/quast/report.tsv",
-            sample=sample_pairs.keys()
-        ),
-        checkm2=expand(
-            "results/{sample}/checkm2/quality_report.tsv",
-            sample=sample_pairs.keys()
-        ),
-        report=html_report_outputs,
-        r_report=r_report_outputs
+        expand("fastqc/{file}_fastqc.html", file=file_names),
+        expand("results/{sample}/amrfinder.tsv", sample=sample_names),
+        expand("results/{sample}/abricate_plasmidfinder.tsv", sample=sample_names),
+        expand("results/{sample}/prokka/{sample}.gff", sample=sample_names),
+        "dataframe/results.csv",
+        get_pangenome_outputs,
+        html_report_outputs,
+        r_report_outputs
 
 rule fastqc:
     input:
@@ -178,12 +130,16 @@ rule fastqc:
     output:
         html="fastqc/{file}_fastqc.html",
         html_zip="fastqc/{file}_fastqc.zip",
+    log:
+        "logs/fastqc/{file}.log"
+    benchmark:
+        "benchmarks/fastqc/{file}.tsv"
     conda:
         "envs/fastqc_env.yml"
     shell:
         """
         mkdir -p fastqc
-        fastqc {input.fastq_files} -o fastqc
+        fastqc {input.fastq_files} -o fastqc > {log} 2>&1
         """
 
 rule shovill:
@@ -196,6 +152,10 @@ rule shovill:
         corrections="results/{sample}/shovill/shovill.corrections",
         log="results/{sample}/shovill/shovill.log",
         spades="results/{sample}/shovill/spades.fasta"
+    log:
+        "logs/shovill/{sample}.log"
+    benchmark:
+        "benchmarks/shovill/{sample}.tsv"
     threads:
         shovill_cpus
     resources:
@@ -204,107 +164,13 @@ rule shovill:
         "envs/shovill_env.yml"
     shell:
         r"""
-        set -euo pipefail
-        if ! shovill --trim \
-                --outdir results/{wildcards.sample}/shovill \
-                --R1 {input.R1} --R2 {input.R2} \
-                --force --cpus {threads} {shovill_ram_flag} ; then
-            echo -e "\n[ERROR] Shovill failed for sample {wildcards.sample}. Check {output.log} for details." >&2
-            mkdir -p results/{wildcards.sample}/shovill results/{wildcards.sample}/status
-            echo "Shovill failed for sample {wildcards.sample}. Check {output.log} for details." > results/{wildcards.sample}/status/shovill.failed.txt
-            if [[ ! -f {output.log} ]]; then
-                :> {output.log}
-            fi
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.assembly}
-                :> {output.gfa}
-                :> {output.corrections}
-                :> {output.spades}
-            else
-                exit 1
-            fi
-        fi
-        """
-
-rule abricate_ncbi:
-    input:
-        assembly="results/{sample}/shovill/contigs.fa"
-    output:
-        abricate="results/{sample}/abricate_ncbi.tsv"
-    conda:
-        "envs/abricate_env.yml"
-    shell:
-        r"""
-        set -euo pipefail
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "Abricate ncbi skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/abricate_ncbi.skipped.txt
-            :> {output.abricate}
-            exit 0
-        fi
-        if ! abricate --db ncbi {input.assembly} > {output.abricate}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "Abricate ncbi failed for {wildcards.sample}." > results/{wildcards.sample}/status/abricate_ncbi.failed.txt
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.abricate}
-            else
-                exit 1
-            fi
-        fi
-        """
-
-rule abricate_plasmidfinder:
-    input:
-        assembly="results/{sample}/shovill/contigs.fa"
-    output:
-        abricate="results/{sample}/abricate_plasmidfinder.tsv"
-    conda:
-        "envs/abricate_env.yml"
-    shell:
-        r"""
-        set -euo pipefail
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "Abricate plasmidfinder skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/abricate_plasmidfinder.skipped.txt
-            :> {output.abricate}
-            exit 0
-        fi
-        if ! abricate --db plasmidfinder {input.assembly} > {output.abricate}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "Abricate plasmidfinder failed for {wildcards.sample}." > results/{wildcards.sample}/status/abricate_plasmidfinder.failed.txt
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.abricate}
-            else
-                exit 1
-            fi
-        fi
-        """
-
-rule abricate_vfdb:
-    input:
-        assembly="results/{sample}/shovill/contigs.fa"
-    output:
-        abricate="results/{sample}/abricate_vfdb.tsv"
-    conda:
-        "envs/abricate_env.yml"
-    shell:
-        r"""
-        set -euo pipefail
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "Abricate vfdb skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/abricate_vfdb.skipped.txt
-            :> {output.abricate}
-            exit 0
-        fi
-        if ! abricate --db vfdb {input.assembly} > {output.abricate}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "Abricate vfdb failed for {wildcards.sample}." > results/{wildcards.sample}/status/abricate_vfdb.failed.txt
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.abricate}
-            else
-                exit 1
-            fi
-        fi
+        {SHELL_HELPERS}
+        exec > {log} 2>&1
+        begin {wildcards.sample} {rule}
+        shovill --trim --outdir results/{wildcards.sample}/shovill \
+            --R1 {input.R1} --R2 {input.R2} \
+            --force --cpus {threads} {shovill_ram_flag} \
+            || fail {wildcards.sample} shovill {output}
         """
 
 rule mlst:
@@ -312,26 +178,104 @@ rule mlst:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
         mlst="results/{sample}/mlst.tsv"
+    log:
+        "logs/mlst/{sample}.log"
+    benchmark:
+        "benchmarks/mlst/{sample}.tsv"
     conda:
         "envs/mlst_env.yml"
     shell:
         r"""
-        set -euo pipefail
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "MLST skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/mlst.skipped.txt
-            :> {output.mlst}
-            exit 0
+        {SHELL_HELPERS}
+        exec 2> {log}
+        begin {wildcards.sample} {rule}
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} mlst {output}; exit 0; }}
+        mlst {input.assembly} > {output.mlst} || fail {wildcards.sample} mlst {output}
+        """
+
+rule amrfinder_database:
+    output:
+        marker="amrfinder/database_path.txt"
+    log:
+        "logs/amrfinder_database.log"
+    conda:
+        "envs/amrfinder_env.yml"
+    shell:
+        r"""
+        exec > {log} 2>&1
+        DB_DIR="${{AMRFINDER_DB_DIR:-$HOME/.pegas/amrfinder_db}}"
+        if [[ ! -f "$DB_DIR/latest/version.txt" ]]; then
+            echo "[pegas] Downloading AMRFinderPlus database (one-time) ..." >&2
+            amrfinder_update --database "$DB_DIR" || true
         fi
-        if ! mlst {input.assembly} > {output.mlst}; then
-            mkdir -p results/{wildcards.sample}/status
-            echo "MLST failed for {wildcards.sample}." > results/{wildcards.sample}/status/mlst.failed.txt
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.mlst}
-            else
-                exit 1
-            fi
+        if [[ -f "$DB_DIR/latest/version.txt" ]]; then
+            echo "$DB_DIR/latest" > {output.marker}
+        else
+            echo "[pegas] AMRFinderPlus database unavailable." >&2
+            [[ "{failure_policy}" == warn ]] || exit 1
+            : > {output.marker}
         fi
+        """
+
+localrules: amrfinder_organism
+
+# AMRFinderPlus --organism (enables point mutations) derived from the MLST species.
+rule amrfinder_organism:
+    input:
+        mlst="results/{sample}/mlst.tsv"
+    output:
+        organism="results/{sample}/amrfinder_organism.txt"
+    run:
+        with open(output.organism, "w") as fh:
+            fh.write(amrfinder_organism(input.mlst) or "")
+
+rule amrfinder:
+    input:
+        assembly="results/{sample}/shovill/contigs.fa",
+        organism="results/{sample}/amrfinder_organism.txt",
+        db="amrfinder/database_path.txt"
+    output:
+        amrfinder="results/{sample}/amrfinder.tsv"
+    log:
+        "logs/amrfinder/{sample}.log"
+    benchmark:
+        "benchmarks/amrfinder/{sample}.tsv"
+    threads:
+        amrfinder_cpus
+    conda:
+        "envs/amrfinder_env.yml"
+    shell:
+        r"""
+        {SHELL_HELPERS}
+        exec > {log} 2>&1
+        begin {wildcards.sample} {rule}
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} amrfinder {output}; exit 0; }}
+        DB="$(cat {input.db})"
+        [[ -n "$DB" ]] || {{ fail {wildcards.sample} amrfinder {output}; exit 0; }}
+        ORG="$(cat {input.organism})"
+        amrfinder -n {input.assembly} --plus ${{ORG:+--organism "$ORG"}} --threads {threads} \
+            --database "$DB" -o {output.amrfinder} || fail {wildcards.sample} amrfinder {output}
+        """
+
+rule abricate_plasmidfinder:
+    input:
+        assembly="results/{sample}/shovill/contigs.fa"
+    output:
+        abricate="results/{sample}/abricate_plasmidfinder.tsv"
+    log:
+        "logs/abricate_plasmidfinder/{sample}.log"
+    benchmark:
+        "benchmarks/abricate_plasmidfinder/{sample}.tsv"
+    conda:
+        "envs/abricate_env.yml"
+    shell:
+        r"""
+        {SHELL_HELPERS}
+        exec 2> {log}
+        begin {wildcards.sample} {rule}
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} abricate_plasmidfinder {output}; exit 0; }}
+        abricate --db plasmidfinder {input.assembly} > {output.abricate} \
+            || fail {wildcards.sample} abricate_plasmidfinder {output}
         """
 
 rule prokka:
@@ -350,56 +294,24 @@ rule prokka:
         tbl="results/{sample}/prokka/{sample}.tbl",
         tsv="results/{sample}/prokka/{sample}.tsv",
         txt="results/{sample}/prokka/{sample}.txt"
+    log:
+        "logs/prokka/{sample}.log"
+    benchmark:
+        "benchmarks/prokka/{sample}.tsv"
     threads:
         prokka_cpus
     conda:
         "envs/prokka_env.yml"
     shell:
         r"""
-        set -euo pipefail
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            mkdir -p results/{wildcards.sample}/prokka results/{wildcards.sample}/status
-            echo "Prokka skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/prokka.skipped.txt
-            :> {output.prokka}
-            :> {output.err}
-            :> {output.faa}
-            :> {output.ffn}
-            :> {output.fna}
-            :> {output.fsa}
-            :> {output.gbk}
-            :> {output.sqn}
-            :> {output.tbl}
-            :> {output.tsv}
-            :> {output.txt}
-            :> {output.log}
-            exit 0
-        fi
-        if ! prokka --centre X --compliant {input.assembly} \
+        {SHELL_HELPERS}
+        exec > {log} 2>&1
+        begin {wildcards.sample} {rule}
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} prokka {output}; exit 0; }}
+        prokka --centre X --compliant {input.assembly} \
             --outdir results/{wildcards.sample}/prokka/ \
-            --force --cpus {threads} \
-            --prefix {wildcards.sample}; then
-            echo -e "\n[ERROR] Prokka failed for sample {wildcards.sample}. Check {output.log} for details." >&2
-            mkdir -p results/{wildcards.sample}/prokka results/{wildcards.sample}/status
-            echo "Prokka failed for sample {wildcards.sample}. Check {output.log} for details." > results/{wildcards.sample}/status/prokka.failed.txt
-            if [[ ! -f {output.log} ]]; then
-                :> {output.log}
-            fi
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.prokka}
-                :> {output.err}
-                :> {output.faa}
-                :> {output.ffn}
-                :> {output.fna}
-                :> {output.fsa}
-                :> {output.gbk}
-                :> {output.sqn}
-                :> {output.tbl}
-                :> {output.tsv}
-                :> {output.txt}
-            else
-                exit 1
-            fi
-        fi
+            --force --cpus {threads} --prefix {wildcards.sample} \
+            || fail {wildcards.sample} prokka {output}
         """
 
 rule quast:
@@ -407,37 +319,34 @@ rule quast:
         assembly="results/{sample}/shovill/contigs.fa"
     output:
         report="results/{sample}/quast/report.tsv"
+    log:
+        "logs/quast/{sample}.log"
+    benchmark:
+        "benchmarks/quast/{sample}.tsv"
     threads:
         quast_cpus
     conda:
         "envs/quast_env.yml"
     shell:
         r"""
-        set -uo pipefail
-        mkdir -p results/{wildcards.sample}/quast results/{wildcards.sample}/status
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            echo "QUAST skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/quast.skipped.txt
-            :> {output.report}
-            exit 0
-        fi
-        if ! quast.py {input.assembly} -o results/{wildcards.sample}/quast --threads {threads}; then
-            echo "QUAST failed for {wildcards.sample}." > results/{wildcards.sample}/status/quast.failed.txt
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.report}
-            else
-                exit 1
-            fi
-        fi
+        {SHELL_HELPERS}
+        exec > {log} 2>&1
+        begin {wildcards.sample} {rule}
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} quast {output}; exit 0; }}
+        quast.py {input.assembly} -o results/{wildcards.sample}/quast --threads {threads} \
+            || fail {wildcards.sample} quast {output}
         """
 
 rule checkm2_database:
     output:
         marker="checkm2/database_path.txt"
+    log:
+        "logs/checkm2_database.log"
     conda:
         "envs/checkm2_env.yml"
     shell:
         r"""
-        set -uo pipefail
+        exec > {log} 2>&1
         mkdir -p checkm2
         DB_DIR="${{CHECKM2_DB_DIR:-$HOME/.pegas/checkm2_db}}"
         if [[ -n "${{CHECKM2DB:-}}" && -f "${{CHECKM2DB}}" ]]; then
@@ -445,22 +354,14 @@ rule checkm2_database:
             exit 0
         fi
         FOUND="$(find "$DB_DIR" -name '*.dmnd' 2>/dev/null | head -n1 || true)"
-        if [[ -n "$FOUND" ]]; then
-            echo "$FOUND" > {output.marker}
-            exit 0
-        fi
-        mkdir -p "$DB_DIR"
-        echo "[pegas] Downloading CheckM2 database (~3 GB, one-time) ..." >&2
-        if checkm2 database --download --path "$DB_DIR"; then
+        if [[ -z "$FOUND" ]]; then
+            mkdir -p "$DB_DIR"
+            echo "[pegas] Downloading CheckM2 database (~3 GB, one-time) ..." >&2
+            checkm2 database --download --path "$DB_DIR" || true
             FOUND="$(find "$DB_DIR" -name '*.dmnd' 2>/dev/null | head -n1 || true)"
-            if [[ -n "$FOUND" ]]; then
-                echo "$FOUND" > {output.marker}
-                exit 0
-            fi
         fi
-        echo "[pegas] Warning: CheckM2 database unavailable; CheckM2 will be skipped." >&2
-        :> {output.marker}
-        exit 0
+        [[ -n "$FOUND" ]] || echo "[pegas] Warning: CheckM2 database unavailable; CheckM2 will be skipped." >&2
+        echo "$FOUND" > {output.marker}
         """
 
 rule checkm2:
@@ -469,38 +370,35 @@ rule checkm2:
         db="checkm2/database_path.txt"
     output:
         report="results/{sample}/checkm2/quality_report.tsv"
+    log:
+        "logs/checkm2/{sample}.log"
+    benchmark:
+        "benchmarks/checkm2/{sample}.tsv"
     threads:
         checkm2_cpus
     conda:
         "envs/checkm2_env.yml"
     shell:
         r"""
-        set -uo pipefail
-        mkdir -p results/{wildcards.sample}/checkm2 results/{wildcards.sample}/status
-        if [[ ! -s {input.assembly} ]] || ! grep -q '^>' {input.assembly}; then
-            echo "CheckM2 skipped for {wildcards.sample}: valid assembly not found." > results/{wildcards.sample}/status/checkm2.skipped.txt
-            :> {output.report}
-            exit 0
-        fi
+        {SHELL_HELPERS}
+        exec > {log} 2>&1
+        begin {wildcards.sample} {rule}
+        has_assembly {input.assembly} || {{ skip {wildcards.sample} checkm2 {output}; exit 0; }}
         DB_PATH="$(cat {input.db} 2>/dev/null || true)"
         if [[ -z "$DB_PATH" || ! -f "$DB_PATH" ]]; then
-            echo "CheckM2 skipped for {wildcards.sample}: reference database unavailable." > results/{wildcards.sample}/status/checkm2.skipped.txt
-            :> {output.report}
+            mark {wildcards.sample} checkm2 skipped "CheckM2 skipped for {wildcards.sample}: reference database unavailable."
+            : > {output.report}
             exit 0
         fi
-        if ! checkm2 predict --input {input.assembly} \
-                --output-directory results/{wildcards.sample}/checkm2 \
-                --threads {threads} --database_path "$DB_PATH" --force; then
-            echo "CheckM2 failed for {wildcards.sample}." > results/{wildcards.sample}/status/checkm2.failed.txt
-            if [[ "{failure_policy}" == "warn" ]]; then
-                :> {output.report}
-            else
-                exit 1
-            fi
-        fi
+        checkm2 predict --input {input.assembly} \
+            --output-directory results/{wildcards.sample}/checkm2 \
+            --threads {threads} --database_path "$DB_PATH" --force \
+            || fail {wildcards.sample} checkm2 {output}
         """
 
-rule abricate_database_versions:
+rule database_versions:
+    input:
+        amrfinder_db="amrfinder/database_path.txt"
     output:
         db_versions="dataframe/database_versions.tsv"
     conda:
@@ -508,46 +406,29 @@ rule abricate_database_versions:
     shell:
         r"""
         mkdir -p dataframe
-        if ! abricate --list > {output.db_versions}; then
-            printf 'DATABASE\tSTATUS\tMESSAGE\nabricate\tunavailable\tabricate --list failed\n' > {output.db_versions}
-        fi
+        abricate --list 2>/dev/null | awk -F'\t' '$1 == "DATABASE" || $1 == "plasmidfinder"' > {output.db_versions} || true
+        [[ -s {output.db_versions} ]] || printf 'DATABASE\tSEQUENCES\tDBTYPE\tDATE\nplasmidfinder\t-\t-\tunavailable\n' > {output.db_versions}
+        AMR_DB="$(cat {input.amrfinder_db})"
+        printf 'amrfinderplus\t-\t-\t%s\n' "$(cat "$AMR_DB/version.txt" 2>/dev/null || echo unavailable)" >> {output.db_versions}
         """
 
 checkpoint build_dataframe:
     input:
-        html=expand("fastqc/{file}_fastqc.html", file=file_names),
-        html_zip=expand("fastqc/{file}_fastqc.zip", file=file_names),
-        abricate_ncbi=expand("results/{sample}/abricate_ncbi.tsv", sample=sample_names),
-        abricate_plasmidfinder=expand("results/{sample}/abricate_plasmidfinder.tsv", sample=sample_names),
-        abricate_vfdb=expand("results/{sample}/abricate_vfdb.tsv", sample=sample_names),
-        mlst=expand("results/{sample}/mlst.tsv", sample=sample_names),
-        shovill=expand("results/{sample}/shovill/contigs.fa", sample=sample_names),
-        prokka=expand("results/{sample}/prokka/{sample}.gff", sample=sample_names),
-        quast=expand("results/{sample}/quast/report.tsv", sample=sample_names),
-        checkm2=expand("results/{sample}/checkm2/quality_report.tsv", sample=sample_names),
-        db_versions="dataframe/database_versions.tsv"
+        expand("fastqc/{file}_fastqc.html", file=file_names),
+        expand("fastqc/{file}_fastqc.zip", file=file_names),
+        expand("results/{sample}/shovill/contigs.fa", sample=sample_names),
+        expand("results/{sample}/amrfinder.tsv", sample=sample_names),
+        expand("results/{sample}/abricate_plasmidfinder.tsv", sample=sample_names),
+        expand("results/{sample}/mlst.tsv", sample=sample_names),
+        expand("results/{sample}/prokka/{sample}.gff", sample=sample_names),
+        expand("results/{sample}/quast/report.tsv", sample=sample_names),
+        expand("results/{sample}/checkm2/quality_report.tsv", sample=sample_names),
+        "dataframe/database_versions.tsv"
     output:
         dataframe="dataframe/results.csv",
         status="dataframe/sample_status.tsv"
     run:
         build_dataframe()
-
-def get_pangenome_prokka_outputs(wildcards):
-    # Get the output of the build_dataframe checkpoint
-    df_output = checkpoints.build_dataframe.get().output[0]
-    df = pd.read_csv(df_output, dtype={'SAMPLE': str})
-    
-    # Get species with more than one sample
-    df_grouped = df.groupby('SPECIES')['SAMPLE'].nunique().reset_index()
-    eligible_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
-    
-    # Get the list of Prokka outputs needed
-    prokka_files = []
-    for species in eligible_species:
-        samples = df.loc[df['SPECIES'] == species, 'SAMPLE'].unique()
-        for sample in samples:
-            prokka_files.append(f"results/{sample}/prokka/{sample}.gff")
-    return prokka_files
 
 checkpoint pangenome:
     input:
@@ -555,27 +436,19 @@ checkpoint pangenome:
         prokka_outputs=get_pangenome_prokka_outputs
     output:
         pangenome_dir=directory("pangenome")
+    params:
+        groups=lambda wildcards, input: json.dumps(pangenome_groups(input.dataframe)),
+        script=os.path.join(install_path, "run_roary.py")
+    log:
+        "logs/roary.log"
     threads:
         roary_cpus
     conda:
         "envs/roary_env.yml"
-    script:
-        "run_roary.py"
-
-def get_pangenome_outputs(wildcards):
-    df_output = checkpoints.build_dataframe.get().output[0]
-    df = pd.read_csv(df_output, dtype={'SAMPLE': str})
-    df_grouped = df.groupby('SPECIES')['SAMPLE'].nunique().reset_index()
-    eligible_species = df_grouped.loc[df_grouped['SAMPLE'] > 1, 'SPECIES'].tolist()
-    checkpoints.pangenome.get().output[0]
-    outputs = []
-    for sp in eligible_species:
-        gene_presence = f"pangenome/{sp}/output/gene_presence_absence.csv"
-        summary_stats = f"pangenome/{sp}/output/summary_statistics.txt"
-        if os.path.exists(gene_presence) and os.path.exists(summary_stats):
-            outputs.append(gene_presence)
-            outputs.append(summary_stats)
-    return outputs
+    shell:
+        """
+        python {params.script} '{params.groups}' {threads} > {log} 2>&1
+        """
 
 rule build_report:
     input:
@@ -591,6 +464,7 @@ rule build_r_report:
         dataframe="dataframe/results.csv",
         status="dataframe/sample_status.tsv",
         db_versions="dataframe/database_versions.tsv",
+        pangenome_outputs=get_pangenome_outputs,
         rmd_template=rmd_template_path,
         render_script=r_render_script_path
     output:
@@ -598,9 +472,11 @@ rule build_r_report:
     params:
         data_dir=raw_data_path,
         output_dir=work_directory,
-        report_html="report/report.html" if interactive_report else "",
+        report_html=os.path.join(work_directory or ".", "report/report.html") if interactive_report else "",
         pegas_version=pegas_version,
         pegas_install_dir=install_path
+    log:
+        "logs/report_r.log"
     conda:
         "envs/report_r_env.yml"
     shell:
@@ -608,10 +484,10 @@ rule build_r_report:
         Rscript "{input.render_script}" \
             --rmd "{input.rmd_template}" \
             --output "{output.html}" \
-            --dataframe_csv "{input.dataframe}" \
+            --dataframe_csv "$PWD/{input.dataframe}" \
             --report_html "{params.report_html}" \
             --data_dir "{params.data_dir}" \
             --output_dir "{params.output_dir}" \
             --pegas_version "{params.pegas_version}" \
-            --pegas_install_dir "{params.pegas_install_dir}"
+            --pegas_install_dir "{params.pegas_install_dir}" > {log} 2>&1
         """

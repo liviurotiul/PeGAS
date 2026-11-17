@@ -234,7 +234,7 @@ def generate_virulence_factor_bar_chart(df, species_dict):
 
     for sp in species:
         species_name = species_dict.get(sp, sp)
-        df_species = df[(df['SPECIES'] == sp) & (df['PREDICTION_SOURCE'] == "VFDB")]
+        df_species = df[(df['SPECIES'] == sp) & (df['PREDICTION_SOURCE'] == "Virulence")]
 
         # Count the appearance of each virulence factor.
         virulence_counts = df_species['GENE'].value_counts()

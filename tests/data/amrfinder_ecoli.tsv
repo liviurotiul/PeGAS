@@ -1,0 +1,9 @@
+Protein id	Contig id	Start	Stop	Strand	Element symbol	Element name	Scope	Type	Subtype	Class	Subclass	Method	Target length	Reference sequence length	% Coverage of reference	% Identity to reference	Alignment length	Closest reference accession	Closest reference name	HMM accession	HMM description
+NA	contig00002	123592	126216	+	gyrA_S83L	Escherichia quinolone resistant GyrA	core	AMR	POINT	QUINOLONE	QUINOLONE	POINTX	875	878	99.66	98.97	875	WP_001281243.1	DNA gyrase subunit A GyrA	NA	NA
+NA	contig00006	5373	6791	-	espX1	type III secretion system effector EspX1	plus	VIRULENCE	VIRULENCE	NA	NA	BLASTX	473	473	100.00	92.18	473	ADD54679.1	type III secretion system effector EspX1	NA	NA
+NA	contig00012	117486	117749	-	ariR	biofilm/acid-resistance regulator AriR	plus	STRESS	ACID	NA	NA	EXACTX	88	88	100.00	100.00	88	AAC74250.1	biofilm/acid-resistance regulator AriR	NA	NA
+NA	contig00018	20954	23209	+	parC_S80I	Escherichia quinolone resistant ParC	core	AMR	POINT	QUINOLONE	QUINOLONE	POINTX	752	752	100.00	99.73	752	WP_001281881.1	DNA topoisomerase IV subunit A ParC	NA	NA
+NA	contig00021	56508	56798	-	iss	increased serum survival lipoprotein Iss	plus	VIRULENCE	VIRULENCE	NA	NA	EXACTX	97	97	100.00	100.00	97	BAG76115.1	increased serum survival lipoprotein Iss	NA	NA
+NA	contig00022	47494	51741	-	fdeC	inverse autotransporter adhesin FdeC	plus	VIRULENCE	VIRULENCE	NA	NA	BLASTX	1416	1416	100.00	94.07	1416	ABE05822.1	inverse autotransporter adhesin FdeC	NA	NA
+NA	contig00005	54755	55885	+	blaEC	BlaEC family class C beta-lactamase	plus	AMR	AMR	BETA-LACTAM	BETA-LACTAM	BLASTX	377	377	100.00	98.14	377	WP_063610930.1	extended-spectrum class C beta-lactamase EC-15	NA	NA
+NA	contig00043	18562	19758	+	tet(A)	tetracycline efflux MFS transporter Tet(A)	core	AMR	AMR	TETRACYCLINE	TETRACYCLINE	EXACTX	399	399	100.00	100.00	399	WP_012579085.1	tetracycline efflux MFS transporter Tet(A)	NA	NA

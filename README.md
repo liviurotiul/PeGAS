@@ -6,7 +6,10 @@ This is PeGAS, a bioinformatic tool designed for seamless QC, assembly, and anno
 
 - **Quality Control:** FastQC-based QC for Illumina paired-end reads.
 - **Assembly:** De novo assembly using SPAdes (via Shovill).
-- **Annotation:** Abricate for gene profiling and Prokka for pangenome inputs.
+- **AMR and virulence:** AMRFinderPlus (`--plus`) for resistance genes, **resistance point mutations** (e.g. gyrA/parC, when the MLST species is supported), virulence and stress genes.
+- **Plasmids:** PlasmidFinder replicon typing (via Abricate).
+- **Typing and QC:** MLST, QUAST, CheckM2, with a PASS/WARN/FAIL verdict per assembly.
+- **Pangenome:** Prokka + Roary per species (samples without an assigned species are never pooled).
 - **Reports:** Clean, static R HTML report by default, with an optional interactive HTML report.
 - **GUI:** Launch a simple GUI to configure runs without remembering CLI flags.
 - **Parallel execution:** Multi-core execution across pipeline steps, with per-tool core controls.
@@ -68,63 +71,95 @@ This creates a new environment called `pegas-lite` and installs the package from
 
 ### 5. Running from the CLI
 
-- Copy your `fastq.gz` files into a working folder (separate from the install path).
-- Run the pipeline from the activated environment:
+- Put your paired reads in a folder (separate from the install path), or list them in a samplesheet.
+- Check what PeGAS detected before spending hours of compute:
 
 ```bash
-pegas -d /path/to/fastqs -o /path/to/output --cores 16 --overwrite
+pegas -d /path/to/fastqs -o /path/to/output --dry-run
 ```
+
+- Then run it:
+
+```bash
+pegas -d /path/to/fastqs -o /path/to/output --cores 16
+```
+
+**Input naming.** Files ending in `.fastq.gz`, `.fq.gz`, `.fastq` or `.fq` are paired by their mate token, for example `S1_R1.fastq.gz`/`S1_R2.fastq.gz`, `S1_L001_R1_001.fastq.gz` or `SRR123_1.fq.gz`/`SRR123_2.fq.gz`. Files without a recognisable mate, and samples missing R1 or R2, are listed as warnings and left out. For any other naming, use a samplesheet (CSV or TSV; relative paths are resolved against the samplesheet's folder):
+
+```text
+sample,r1,r2
+isolate_A,reads/A_forward.fq.gz,reads/A_reverse.fq.gz
+```
+
+```bash
+pegas --samplesheet samples.csv -o /path/to/output
+```
+
+**Re-running and resuming.** Running again with the same `-o` resumes the previous run and only computes what is missing (for example after a crash or after adding samples). `--overwrite` deletes the previous results and starts over. PeGAS refuses to write into a non-empty folder that is not a PeGAS output folder.
 
 Full usage (same for `pegas-lite`):
 
 ```bash
-usage: pegas [-h] -d DATA -o OUTPUT [-c CORES] [--overwrite]
-             [--shovill-cpu-cores SHOVILL_CPU_CORES]
-             [--shovill-ram SHOVILL_RAM]
-             [--prokka-cpu-cores PROKKA_CPU_CORES]
+usage: pegas [-h] [-d DATA] [--samplesheet SAMPLESHEET] -o OUTPUT [-c CORES]
+             [--overwrite] [--dry-run] [--shovill-cpu-cores SHOVILL_CPU_CORES]
+             [--shovill-ram SHOVILL_RAM] [--prokka-cpu-cores PROKKA_CPU_CORES]
+             [--amrfinder-cpu-cores AMRFINDER_CPU_CORES]
+             [--quast-cpu-cores QUAST_CPU_CORES]
+             [--checkm2-cpu-cores CHECKM2_CPU_CORES]
              [--roary-cpu-cores ROARY_CPU_CORES]
              [--on-tool-failure {stop,warn}] [--interactive]
 
-Run the PeGAS pipeline.
-
 options:
-  -h, --help            show this help message and exit
-  -d DATA, --data DATA  Directory with fastq.gz files
+  -d DATA, --data DATA  Directory with paired FASTQ files (.fastq.gz, .fq.gz,
+                        .fastq, .fq)
+  --samplesheet SAMPLESHEET
+                        CSV/TSV with columns sample,r1,r2 (alternative to
+                        --data)
   -o OUTPUT, --output OUTPUT
                         Directory for outputs
   -c CORES, --cores CORES
                         Total cores to use (default: all)
-  --overwrite           Overwrite the output directory if it exists
-  --shovill-cpu-cores SHOVILL_CPU_CORES
-                        Number of CPU cores to use for Shovill
-  --shovill-ram SHOVILL_RAM
-                        RAM in GB to allocate to Shovill
-  --prokka-cpu-cores PROKKA_CPU_CORES
-                        Number of CPU cores to use for Prokka
-  --roary-cpu-cores ROARY_CPU_CORES
-                        Number of CPU cores to use for Roary
+  --overwrite           Delete the previous results in the output directory
+                        and start over (without it, an existing PeGAS output
+                        directory is resumed)
+  --dry-run             Show detected samples and planned resources, then exit
+  --shovill-cpu-cores, --shovill-ram (GB), --prokka-cpu-cores,
+  --amrfinder-cpu-cores, --quast-cpu-cores, --checkm2-cpu-cores,
+  --roary-cpu-cores     Per-tool resources (sensible defaults are derived
+                        from --cores and the machine's RAM)
   --on-tool-failure {stop,warn}
                         Stop on tool failures, or warn and continue with
-                        explicit failed/skipped sample status
+                        explicit failed/skipped sample status.
   --interactive         Generate the interactive HTML report (optional)
 ```
+
+**Requirements and databases.**
+
+- RAM: Shovill (SPAdes) is the most demanding step; 16 GB is comfortable for typical bacterial genomes, and PeGAS sizes Shovill jobs to the available RAM.
+- Disk: plan roughly 1 to 2 GB per sample for intermediate files, plus about 5 GB for the per-tool conda environments.
+- Databases are downloaded once on first use and shared between runs: AMRFinderPlus (~250 MB) in `~/.pegas/amrfinder_db` (override with `AMRFINDER_DB_DIR`) and CheckM2 (~3 GB) in `~/.pegas/checkm2_db` (override with `CHECKM2_DB_DIR`, or point `CHECKM2DB` at an existing `.dmnd` file). Offline machines should pre-populate these folders.
 
 ### 6. Reports and GUI
 
 - **Default report:** `report/report_r.html` is a clean, static, shareable HTML report. It starts with interpretation-first sections for sample status, AMR, virulence, plasmids, thresholds, and tool/database versions.
 - **Interactive report (optional):** add `--interactive` to also generate the older Plotly/Jinja report at `report/report.html`.
-- **GUI:** run `pegas` or `pegas-lite` with no arguments to launch the GUI. The GUI mirrors the CLI flags.
+- **GUI:** run `pegas` or `pegas-lite` with no arguments to launch the GUI. It covers the common CLI flags; pick an existing output folder to resume it.
 
 ### 7. Visualising the results
 
-After processing completes, start with:
+When a run finishes, PeGAS prints a short summary: how many samples passed QC, which samples need attention and why, and where the report is. Then look at:
 
 - `report/report_r.html`: main static report.
-- `dataframe/sample_status.tsv`: per-sample status for FastQC, Shovill, Abricate, MLST, and Prokka.
-- `dataframe/results.csv`: combined AMR, virulence, plasmid, MLST, and assembly summary table.
-- `dataframe/database_versions.tsv`: Abricate database information when available.
-- `pegas_config.json`: run parameters and detected tool versions.
+- `dataframe/pegas_results.xlsx`: one workbook with sample status, assembly QC and the presence/absence matrices.
+- `dataframe/assembly_qc.tsv`: per-sample species, ST, QUAST/CheckM2 metrics and the `QC_STATUS` (PASS/WARN/FAIL) with `QC_NOTES`. FAIL: completeness < 80%, contamination > 10%, N50 < 5 kb or more than 1000 contigs. WARN: completeness < 90%, contamination > 5%, N50 < 20 kb, more than 500 contigs, GC more than 2 points from the species' expected value, or no species assigned.
+- `dataframe/amr_matrix.tsv`, `virulence_matrix.tsv`, `plasmid_matrix.tsv`: sample x gene presence/absence (point mutations appear as e.g. `gyrA_S83L`).
+- `dataframe/results.csv`: every hit, one row each (`PREDICTION_SOURCE` is `AMR`, `Virulence`, `Stress` or `PlasmidFinder`; `ELEMENT_SUBTYPE` is `POINT` for point mutations).
+- `dataframe/sample_status.tsv`: per-sample status of every step.
+- `dataframe/database_versions.tsv` and `pegas_config.json`: database and tool versions and run parameters.
+- `logs/<step>/<sample>.log` and `benchmarks/<step>/<sample>.tsv` (`pegas`) or `results/<sample>/status/*.log` (`pegas-lite`): tool logs and per-step runtime/memory.
 - `results/`: per-sample tool outputs.
+
+Samples whose MLST scheme is unknown are labelled `Unassigned`; they are analysed individually but never grouped into a pangenome.
 
 ### PeGAS works out of the box on Linux systems. For Windows and macOS, we recommend using virtualization software like Docker or WSL.
 

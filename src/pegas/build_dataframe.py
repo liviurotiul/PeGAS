@@ -5,6 +5,13 @@ import re
 import pandas as pd
 from tqdm import tqdm
 
+try:
+    from .common import fastq_id, UNASSIGNED_SPECIES
+    from .utils import species_dict
+except ImportError:
+    from common import fastq_id, UNASSIGNED_SPECIES
+    from utils import species_dict
+
 
 RESULT_COLUMNS = [
     "SAMPLE",
@@ -20,6 +27,7 @@ RESULT_COLUMNS = [
     "END",
     "SEQUENCE",
     "STRAND",
+    "ELEMENT_SUBTYPE",
     "PREDICTION_SOURCE",
     "CONTIG_LENGTH",
     "CONTIG_COVERAGE",
@@ -39,14 +47,33 @@ ABRICATE_COLUMNS = [
     "STRAND",
 ]
 
+# results.csv column -> AMRFinderPlus header (v4 name first, then the v3 name).
+AMRFINDER_COLUMNS = {
+    "GENE": ("Element symbol", "Gene symbol"),
+    "ACCESSION": ("Closest reference accession", "Accession of closest sequence"),
+    "PRODUCT": ("Element name", "Sequence name"),
+    "%IDENTITY": ("% Identity to reference", "% Identity to reference sequence"),
+    "%COVERAGE": ("% Coverage of reference", "% Coverage of reference sequence"),
+    "RESISTANCE": ("Class",),
+    "START": ("Start",),
+    "END": ("Stop",),
+    "SEQUENCE": ("Contig id",),
+    "STRAND": ("Strand",),
+    "ELEMENT_SUBTYPE": ("Subtype", "Element subtype"),
+    "PREDICTION_SOURCE": ("Type", "Element type"),
+}
+# AMRFinderPlus "Type" -> PREDICTION_SOURCE label used by the reports.
+AMRFINDER_SOURCES = {"AMR": "AMR", "VIRULENCE": "Virulence", "STRESS": "Stress"}
+# Presence/absence matrices written next to results.csv.
+MATRIX_SOURCES = {"AMR": "amr", "Virulence": "virulence", "PlasmidFinder": "plasmid"}
+
 STATUS_COLUMNS = [
     "SAMPLE",
     "FASTQC",
     "SHOVILL",
-    "ABRICATE_NCBI",
-    "ABRICATE_PLASMIDFINDER",
-    "ABRICATE_VFDB",
     "MLST",
+    "AMRFINDER",
+    "PLASMIDFINDER",
     "PROKKA",
     "QUAST",
     "CHECKM2",
@@ -56,6 +83,7 @@ STATUS_COLUMNS = [
 ASSEMBLY_QC_COLUMNS = [
     "SAMPLE",
     "SPECIES",
+    "ST",
     "CONTIGS",
     "TOTAL_LENGTH",
     "LARGEST_CONTIG",
@@ -64,24 +92,19 @@ ASSEMBLY_QC_COLUMNS = [
     "GC_PERCENT",
     "COMPLETENESS",
     "CONTAMINATION",
+    "QC_STATUS",
+    "QC_NOTES",
 ]
 
-READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
-
-
-def parse_fastq_read(filename):
-    base = os.path.basename(filename)
-    if not base.endswith(".fastq.gz"):
-        return None
-    stem = base[:-9]
-    matches = list(READ_TOKEN_RE.finditer(stem))
-    if not matches:
-        return None
-    match = matches[-1]
-    sample = stem[:match.start()].rstrip("._-")
-    if not sample:
-        return None
-    return sample, f"R{match.group(1)}"
+# column: (direction, WARN threshold, FAIL threshold)
+QC_THRESHOLDS = {
+    "COMPLETENESS": ("min", 90, 80),
+    "CONTAMINATION": ("max", 5, 10),
+    "N50": ("min", 20000, 5000),
+    "CONTIGS": ("max", 500, 1000),
+}
+QC_GC_TOLERANCE = 2.0  # percentage points away from the species' expected GC
+QC_LEVELS = ["PASS", "WARN", "FAIL"]
 
 
 def load_manifest_samples():
@@ -206,6 +229,8 @@ def read_mlst(sample, markers):
         return "Unknown", "Unknown", "no_call", "MLST returned no species/subtype"
     species = str(mlst.iloc[0, 1]) if pd.notna(mlst.iloc[0, 1]) else "Unknown"
     subtype = str(mlst.iloc[0, 2]) if pd.notna(mlst.iloc[0, 2]) else "Unknown"
+    if species in UNASSIGNED_SPECIES:
+        return "Unassigned", "-", "no_call", "no MLST scheme matched; species unassigned"
     return species, subtype, "ok", ""
 
 
@@ -310,30 +335,101 @@ def assembly_metrics_from_contigs(sample):
     }
 
 
-def read_abricate(sample, db_name, prediction_source, markers):
-    stage = f"abricate_{db_name}"
+def read_tool_tsv(sample, stage, filename, markers):
+    """Read results/<sample>/<filename>; returns (df or None, status, note)."""
     failed_status, failed_message = marker_status(markers, stage)
     if failed_status in ("failed", "skipped"):
-        return pd.DataFrame(columns=ABRICATE_COLUMNS), failed_status, failed_message
-
-    path = os.path.join("results", sample, f"abricate_{db_name}.tsv")
+        return None, failed_status, failed_message
+    path = os.path.join("results", sample, filename)
     if not os.path.isfile(path):
-        return pd.DataFrame(columns=ABRICATE_COLUMNS), "missing", f"abricate_{db_name}.tsv not found"
+        return None, "missing", f"{filename} not found"
     if os.path.getsize(path) == 0:
-        return pd.DataFrame(columns=ABRICATE_COLUMNS), "no_hits", ""
+        return None, "no_hits", ""
     try:
         df = pd.read_csv(path, sep="\t")
     except Exception as exc:
-        return pd.DataFrame(columns=ABRICATE_COLUMNS), "failed", f"failed to parse {os.path.basename(path)}: {exc}"
+        return None, "failed", f"failed to parse {filename}: {exc}"
+    return (None, "no_hits", "") if df.empty else (df, "ok", "")
 
-    if df.empty:
-        return pd.DataFrame(columns=ABRICATE_COLUMNS), "no_hits", ""
-    for column in ABRICATE_COLUMNS:
-        if column not in df.columns:
-            df[column] = pd.NA
-    df = df[ABRICATE_COLUMNS].copy()
-    df["PREDICTION_SOURCE"] = prediction_source
+
+def read_amrfinder(sample, markers):
+    df, status, note = read_tool_tsv(sample, "amrfinder", "amrfinder.tsv", markers)
+    if df is None:
+        return pd.DataFrame(columns=RESULT_COLUMNS), status, note
+    out = pd.DataFrame(index=df.index)
+    for column, headers in AMRFINDER_COLUMNS.items():
+        header = next((h for h in headers if h in df.columns), None)
+        out[column] = df[header] if header else pd.NA
+    out["PREDICTION_SOURCE"] = out["PREDICTION_SOURCE"].map(AMRFINDER_SOURCES).fillna("Other")
+    out.loc[out["PREDICTION_SOURCE"] != "AMR", "RESISTANCE"] = pd.NA
+    return out, "ok", ""
+
+
+def read_plasmidfinder(sample, markers):
+    df, status, note = read_tool_tsv(sample, "abricate_plasmidfinder", "abricate_plasmidfinder.tsv", markers)
+    if df is None:
+        return pd.DataFrame(columns=RESULT_COLUMNS), status, note
+    df = df.reindex(columns=ABRICATE_COLUMNS)
+    df["PREDICTION_SOURCE"] = "PlasmidFinder"
     return df, "ok", ""
+
+
+def expected_gc(species):
+    """Expected GC% for an MLST scheme name, from gc_content.json (None if unknown)."""
+    if not hasattr(expected_gc, "table"):
+        try:
+            with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), "gc_content.json")) as fh:
+                expected_gc.table = json.load(fh)
+        except (OSError, ValueError):
+            expected_gc.table = {}
+    value = expected_gc.table.get(species_dict.get(species, species))
+    return pd.to_numeric(value, errors="coerce") if value is not None else None
+
+
+def assess_qc(row):
+    """Return (PASS|WARN|FAIL, notes) for one assembly_qc row."""
+    if pd.isna(pd.to_numeric(row.get("TOTAL_LENGTH"), errors="coerce")):
+        return "FAIL", "no assembly"
+    level, notes = 0, []
+    for column, (direction, warn_at, fail_at) in QC_THRESHOLDS.items():
+        value = pd.to_numeric(row.get(column), errors="coerce")
+        if pd.isna(value):
+            continue
+        worse = (lambda limit: value < limit) if direction == "min" else (lambda limit: value > limit)
+        sign = "<" if direction == "min" else ">"
+        for verdict, limit in ((2, fail_at), (1, warn_at)):
+            if worse(limit):
+                level = max(level, verdict)
+                notes.append(f"{column.lower()} {value:g} {sign} {limit:g}")
+                break
+    gc, expected = pd.to_numeric(row.get("GC_PERCENT"), errors="coerce"), expected_gc(row.get("SPECIES"))
+    if pd.notna(gc) and expected is not None and pd.notna(expected) and abs(gc - expected) > QC_GC_TOLERANCE:
+        level = max(level, 1)
+        notes.append(f"GC {gc:g}% vs expected {expected:g}%")
+    if row.get("SPECIES") == "Unassigned":
+        level = max(level, 1)
+        notes.append("species unassigned")
+    return QC_LEVELS[level], "; ".join(notes)
+
+
+def write_matrices(results, samples):
+    """Sample x gene presence/absence tables (TSV, plus one Excel workbook when openpyxl is available)."""
+    hits = results[results["GENE"] != ""]
+    sheets = {}
+    for source, name in MATRIX_SOURCES.items():
+        subset = hits[hits["PREDICTION_SOURCE"] == source]
+        matrix = pd.crosstab(subset["SAMPLE"], subset["GENE"]).clip(upper=1).reindex(samples, fill_value=0)
+        matrix.index.name = "SAMPLE"
+        matrix.to_csv(f"dataframe/{name}_matrix.tsv", sep="\t")
+        sheets[name] = matrix
+    try:
+        with pd.ExcelWriter("dataframe/pegas_results.xlsx") as writer:
+            for name in ("sample_status", "assembly_qc"):
+                pd.read_csv(f"dataframe/{name}.tsv", sep="\t").to_excel(writer, sheet_name=name, index=False)
+            for name, matrix in sheets.items():
+                matrix.to_excel(writer, sheet_name=f"{name}_matrix")
+    except ImportError:
+        pass
 
 
 def infer_fastqc_status(sample, sample_pairs, markers):
@@ -347,7 +443,7 @@ def infer_fastqc_status(sample, sample_pairs, markers):
 
     missing = []
     for fastq in reads.values():
-        file_id = os.path.basename(fastq).replace(".fastq.gz", "")
+        file_id = fastq_id(fastq)
         html_path = os.path.join("fastqc", f"{file_id}_fastqc.html")
         zip_path = os.path.join("fastqc", f"{file_id}_fastqc.zip")
         if not os.path.exists(html_path) or not os.path.exists(zip_path):
@@ -407,7 +503,7 @@ def finalize_results(df):
     df["CONTIG_LENGTH"] = df["CONTIG_LENGTH"].fillna(0).astype(int)
     df["CONTIG_NUMBER"] = df["CONTIG_NUMBER"].fillna(0).astype(int)
     df["CONTIG_COVERAGE"] = df["CONTIG_COVERAGE"].fillna(0.0)
-    for column in ["SAMPLE", "SPECIES", "SUBTYPE", "GENE", "ACCESSION", "PRODUCT", "RESISTANCE", "SEQUENCE", "STRAND", "PREDICTION_SOURCE"]:
+    for column in ["SAMPLE", "SPECIES", "SUBTYPE", "GENE", "ACCESSION", "PRODUCT", "RESISTANCE", "SEQUENCE", "STRAND", "ELEMENT_SUBTYPE", "PREDICTION_SOURCE"]:
         df[column] = df[column].fillna("").astype(str)
     return df
 
@@ -435,6 +531,7 @@ def build_dataframe():
         assembly_qc_rows.append({
             "SAMPLE": sample,
             "SPECIES": species,
+            "ST": subtype,
             "CONTIGS": quast_metrics.get("CONTIGS"),
             "TOTAL_LENGTH": quast_metrics.get("TOTAL_LENGTH"),
             "LARGEST_CONTIG": quast_metrics.get("LARGEST_CONTIG"),
@@ -444,28 +541,25 @@ def build_dataframe():
             "COMPLETENESS": checkm2_metrics.get("COMPLETENESS"),
             "CONTAMINATION": checkm2_metrics.get("CONTAMINATION"),
         })
+        assembly_qc_rows[-1]["QC_STATUS"], assembly_qc_rows[-1]["QC_NOTES"] = assess_qc(assembly_qc_rows[-1])
 
-        abricate_frames = []
-        abricate_statuses = {}
-        for db_name, prediction_source, status_column in [
-            ("ncbi", "NCBI", "ABRICATE_NCBI"),
-            ("plasmidfinder", "PlasmidFinder", "ABRICATE_PLASMIDFINDER"),
-            ("vfdb", "VFDB", "ABRICATE_VFDB"),
-        ]:
-            df_hits, status, note = read_abricate(sample, db_name, prediction_source, markers)
-            abricate_statuses[status_column] = status
+        hit_frames = []
+        hit_statuses = {}
+        for status_column, reader in (("AMRFINDER", read_amrfinder), ("PLASMIDFINDER", read_plasmidfinder)):
+            df_hits, status, note = reader(sample, markers)
+            hit_statuses[status_column] = status
             if note:
                 notes.append(note)
             df_hits = add_sample_context(df_hits, sample, species, subtype, n50_value, n50_coverage, contig_number)
             if not df_hits.empty:
-                abricate_frames.append(df_hits)
+                hit_frames.append(df_hits)
 
         for note in [fastqc_note, shovill_note, mlst_note, prokka_note, quast_note, checkm2_note]:
             if note:
                 notes.append(note)
 
-        if abricate_frames:
-            result_frames.append(pd.concat(abricate_frames, ignore_index=True))
+        if hit_frames:
+            result_frames.append(pd.concat(hit_frames, ignore_index=True))
         else:
             result_frames.append(placeholder_row(sample, species, subtype, n50_value, n50_coverage, contig_number))
 
@@ -473,10 +567,8 @@ def build_dataframe():
             "SAMPLE": sample,
             "FASTQC": fastqc_status,
             "SHOVILL": shovill_status,
-            "ABRICATE_NCBI": abricate_statuses["ABRICATE_NCBI"],
-            "ABRICATE_PLASMIDFINDER": abricate_statuses["ABRICATE_PLASMIDFINDER"],
-            "ABRICATE_VFDB": abricate_statuses["ABRICATE_VFDB"],
             "MLST": mlst_status,
+            **hit_statuses,
             "PROKKA": prokka_status,
             "QUAST": quast_status,
             "CHECKM2": checkm2_status,
@@ -499,3 +591,4 @@ def build_dataframe():
     results.to_csv("dataframe/results.csv", index=False)
     status_df.to_csv("dataframe/sample_status.tsv", sep="\t", index=False)
     assembly_qc_df.to_csv("dataframe/assembly_qc.tsv", sep="\t", index=False)
+    write_matrices(results, samples)

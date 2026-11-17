@@ -4,7 +4,6 @@ import os
 import sys
 import shutil
 import warnings
-import re
 import json
 
 from tqdm import tqdm
@@ -14,12 +13,19 @@ import multiprocessing as mp
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+try:
+    from .gui import launch_gui
+    from .common import list_fastq_files, build_fastq_pairs, read_samplesheet, fastq_id, get_core_sample_name
+except ImportError:
+    from gui import launch_gui
+    from common import list_fastq_files, build_fastq_pairs, read_samplesheet, fastq_id, get_core_sample_name
+
 CAP = 16
-READ_TOKEN_RE = re.compile(r"R([12])(?=$|[._-])", re.IGNORECASE)
 CONFIG_FILENAME = "pegas_config.json"
 TOOL_VERSION_PACKAGES = {
     "fastqc": ["fastqc"],
     "shovill": ["shovill"],
+    "amrfinderplus": ["ncbi-amrfinderplus"],
     "abricate": ["abricate"],
     "mlst": ["mlst"],
     "prokka": ["prokka"],
@@ -28,22 +34,39 @@ TOOL_VERSION_PACKAGES = {
     "roary": ["roary"],
     "rscript": ["r-base"],
 }
+CORE_OPTIONS = (
+    "shovill_cpu_cores", "prokka_cpu_cores", "amrfinder_cpu_cores",
+    "quast_cpu_cores", "checkm2_cpu_cores", "roary_cpu_cores",
+)
+PROBLEM_STATUSES = {"failed", "skipped", "missing", "no_call"}
+OUTPUT_MODES = {
+    "new": "new run",
+    "resume": "resume: finished steps are reused",
+    "overwrite": "start over: previous results will be deleted",
+}
 
-try:
-    from .gui import launch_gui
-except ImportError:
-    from gui import launch_gui
+
+def fail(message):
+    tqdm.write(f"[pegas] Error: {message}")
+    sys.exit(1)
+
 
 # ---- Argument parsing ----.
 def build_parser():
     parser = argparse.ArgumentParser(description="Run the PeGAS pipeline.")
-    parser.add_argument("-d", "--data", required=True, help="Directory with fastq.gz files")
+    parser.add_argument("-d", "--data", help="Directory with paired FASTQ files (.fastq.gz, .fq.gz, .fastq, .fq)")
+    parser.add_argument("--samplesheet", help="CSV/TSV with columns sample,r1,r2 (alternative to --data)")
     parser.add_argument("-o", "--output", required=True, help="Directory for outputs")
     parser.add_argument("-c", "--cores", type=int, help="Total cores to use (default: all)")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite output dir if it exists")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Delete the previous results in the output directory and start over "
+                             "(without it, an existing PeGAS output directory is resumed)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show detected samples and planned resources, then exit")
     parser.add_argument("--shovill-cpu-cores", type=int)
     parser.add_argument("--shovill-ram", type=int, help="RAM (GB) to allocate to Shovill")
     parser.add_argument("--prokka-cpu-cores", type=int)
+    parser.add_argument("--amrfinder-cpu-cores", type=int)
     parser.add_argument("--quast-cpu-cores", type=int)
     parser.add_argument("--checkm2-cpu-cores", type=int)
     parser.add_argument("--roary-cpu-cores",  type=int)
@@ -93,14 +116,9 @@ def finalize_arguments(args, lite_mode=False):
             args.shovill_ram = rsingle
         elif args.shovill_cpu_cores is None:
             args.shovill_cpu_cores = min(CAP, args.cores)
-        if args.prokka_cpu_cores is None:
-            args.prokka_cpu_cores = args.cores
-        if args.quast_cpu_cores is None:
-            args.quast_cpu_cores = args.cores
-        if args.checkm2_cpu_cores is None:
-            args.checkm2_cpu_cores = args.cores
-        if args.roary_cpu_cores is None:
-            args.roary_cpu_cores = args.cores
+        for option in CORE_OPTIONS[1:]:
+            if getattr(args, option) is None:
+                setattr(args, option, args.cores)
     else:
         if args.shovill_cpu_cores is None and args.shovill_ram is None:
             ram_gb = get_total_ram_gb()
@@ -113,16 +131,12 @@ def finalize_arguments(args, lite_mode=False):
                     tjob = args.cores
                 args.shovill_cpu_cores = tjob
                 args.shovill_ram = rjob
-        if args.shovill_cpu_cores is None:
-            args.shovill_cpu_cores = default_chunk(args.cores)
-        if args.prokka_cpu_cores is None:
-            args.prokka_cpu_cores = default_chunk(args.cores)
-        if args.quast_cpu_cores is None:
-            args.quast_cpu_cores = default_chunk(args.cores)
-        if args.checkm2_cpu_cores is None:
-            args.checkm2_cpu_cores = args.cores
-        if args.roary_cpu_cores is None:
-            args.roary_cpu_cores = args.cores
+        for option in ("shovill_cpu_cores", "prokka_cpu_cores", "amrfinder_cpu_cores", "quast_cpu_cores"):
+            if getattr(args, option) is None:
+                setattr(args, option, default_chunk(args.cores))
+        for option in ("checkm2_cpu_cores", "roary_cpu_cores"):
+            if getattr(args, option) is None:
+                setattr(args, option, args.cores)
 
     if not hasattr(args, "interactive"):
         args.interactive = False
@@ -138,64 +152,110 @@ def parse_arguments(argv=None):
 
     return finalize_arguments(args, lite_mode=False)
 
-# ---- Utility functions ----.
-def list_fastq_files(path):
-    """Returns a list of all .fastq.gz files in the specified path."""
-    full_path = os.path.abspath(os.path.expanduser(path))
-    return [f for f in glob(os.path.join(full_path, "*.fastq.gz"))]
+# ---- Inputs and output directory ----.
+def resolve_inputs(args):
+    """Return (data_dir, output_dir, fastq_files, sample_pairs); exits with a message on unusable input."""
+    if args.samplesheet:
+        try:
+            sample_pairs = read_samplesheet(args.samplesheet)
+        except (OSError, ValueError) as exc:
+            fail(f"Invalid samplesheet: {exc}")
+        data_dir = os.path.dirname(os.path.abspath(os.path.expanduser(args.samplesheet)))
+    else:
+        if not args.data:
+            fail("Provide the input reads with -d/--data or --samplesheet.")
+        data_dir = os.path.abspath(os.path.expanduser(args.data))
+        if not os.path.isdir(data_dir):
+            fail(f"Input directory not found: {data_dir}")
+        fastq_files = list_fastq_files(data_dir)
+        if not fastq_files:
+            fail(f"No FASTQ files (.fastq.gz, .fq.gz, .fastq, .fq) found in: {data_dir}")
+        sample_pairs = build_fastq_pairs(fastq_files)
+    if not sample_pairs:
+        fail("No valid R1/R2 pairs found in the input.")
+    fastq_files = sorted(f for reads in sample_pairs.values() for f in reads.values())
+    output_dir = os.path.abspath(os.path.expanduser(args.output))
+    return data_dir, output_dir, fastq_files, sample_pairs
 
-def parse_fastq_read(filename):
-    base = os.path.basename(filename)
-    if not base.endswith(".fastq.gz"):
-        return None
-    stem = base[:-9]
-    matches = list(READ_TOKEN_RE.finditer(stem))
-    if not matches:
-        return None
-    match = matches[-1]
-    sample = stem[:match.start()].rstrip("._-")
-    if not sample:
-        return None
-    return sample, f"R{match.group(1)}"
 
-def get_core_sample_name(filename):
-    """Extracts the core sample name by removing _R1 or _R2 and other suffixes."""
-    parsed = parse_fastq_read(filename)
-    if parsed:
-        return parsed[0]
-    base = os.path.basename(filename)
-    if base.endswith(".fastq.gz"):
-        return base[:-9]
-    return os.path.splitext(base)[0]
+def prepare_output_dir(output_dir, overwrite, dry_run=False):
+    """Return "new", "resume" or "overwrite" for output_dir and get it ready.
 
-def build_fastq_pairs(fastq_files):
-    """Pairs R1 and R2 files based on sample names."""
-    pairs = {}
-    unmatched = []
-    for file in fastq_files:
-        parsed = parse_fastq_read(file)
-        if not parsed:
-            unmatched.append(file)
-            continue
-        sample, read = parsed
-        if sample not in pairs:
-            pairs[sample] = {}
-        pairs[sample][read] = file
+    Only folders that are empty or hold a previous PeGAS run (pegas_config.json)
+    are accepted, so a mistyped -o can never delete unrelated data.
+    """
+    is_pegas_run = os.path.isfile(os.path.join(output_dir, CONFIG_FILENAME))
+    if os.path.isdir(output_dir) and os.listdir(output_dir) and not is_pegas_run:
+        fail(f"{output_dir} is not empty and is not a PeGAS output directory. Choose a new or empty folder.")
+    mode = ("overwrite" if overwrite else "resume") if is_pegas_run else "new"
+    if dry_run:
+        return mode
+    if mode == "overwrite":
+        tqdm.write(f"[pegas] --overwrite: deleting previous results in {output_dir}")
+        for entry in os.listdir(output_dir):
+            if entry == ".snakemake":  # keep cached conda environments
+                continue
+            path = os.path.join(output_dir, entry)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+    elif mode == "resume":
+        tqdm.write(f"[pegas] Resuming the existing run in {output_dir} (use --overwrite to start over).")
+    os.makedirs(output_dir, exist_ok=True)
+    return mode
 
-    orphan_samples = sorted([
-        sample for sample, reads in pairs.items()
-        if "R1" not in reads or "R2" not in reads
-    ])
-    if unmatched:
-        preview = ", ".join(os.path.basename(f) for f in unmatched[:5])
-        more = f" (+{len(unmatched) - 5} more)" if len(unmatched) > 5 else ""
-        tqdm.write(f"[pegas] Warning: {len(unmatched)} FASTQ files did not match the R1/R2 pattern: {preview}{more}")
-    if orphan_samples:
-        preview = ", ".join(orphan_samples[:5])
-        more = f" (+{len(orphan_samples) - 5} more)" if len(orphan_samples) > 5 else ""
-        tqdm.write(f"[pegas] Warning: {len(orphan_samples)} samples missing R1 or R2: {preview}{more}")
 
-    return {s: p for s, p in pairs.items() if "R1" in p and "R2" in p}
+def print_plan(args, mode, data_dir, output_dir, sample_pairs):
+    say = tqdm.write
+    say("[pegas] Dry run: nothing will be executed.")
+    say(f"[pegas] Input:  {args.samplesheet or data_dir}")
+    say(f"[pegas] Output: {output_dir} ({OUTPUT_MODES[mode]})")
+    say(f"[pegas] {len(sample_pairs)} sample(s):")
+    for sample, reads in sorted(sample_pairs.items()):
+        say(f"[pegas]   {sample}: {os.path.basename(reads['R1'])} + {os.path.basename(reads['R2'])}")
+    cores = ", ".join(f"{opt.split('_')[0]} {getattr(args, opt)}" for opt in CORE_OPTIONS)
+    say(f"[pegas] Cores: total {args.cores}; {cores}")
+    say(f"[pegas] Shovill RAM: {args.shovill_ram or 'auto'} GB; on tool failure: {args.on_tool_failure}")
+
+
+def print_run_summary(output_dir):
+    """Print per-sample problems and QC verdicts from the dataframe outputs."""
+    import pandas as pd
+
+    def read_tsv(name):
+        try:
+            return pd.read_csv(os.path.join(output_dir, "dataframe", name), sep="\t", dtype=str).fillna("")
+        except Exception:
+            return None
+
+    status, qc = read_tsv("sample_status.tsv"), read_tsv("assembly_qc.tsv")
+    if status is None:
+        return
+    qc_by_sample = {}
+    if qc is not None and "QC_STATUS" in qc.columns:
+        qc_by_sample = dict(zip(qc["SAMPLE"], zip(qc["QC_STATUS"], qc["QC_NOTES"])))
+    stages = [c for c in status.columns if c not in ("SAMPLE", "NOTES")]
+    attention = []
+    for _, row in status.iterrows():
+        issues = [f"{stage.lower()} {row[stage]}" for stage in stages if row[stage] in PROBLEM_STATUSES]
+        qc_status, qc_notes = qc_by_sample.get(row["SAMPLE"], ("", ""))
+        if qc_status in ("WARN", "FAIL"):
+            issues.append(f"QC {qc_status} ({qc_notes})")
+        if issues:
+            attention.append(f"{row['SAMPLE']}: {'; '.join(issues)}")
+    verdicts = [v for v, _ in qc_by_sample.values()]
+    qc_counts = ", ".join(f"{v} {verdicts.count(v)}" for v in ("PASS", "WARN", "FAIL"))
+    tqdm.write(f"[pegas] Summary: {len(status)} sample(s); QC {qc_counts}; {len(attention)} need attention.")
+    for line in attention[:20]:
+        tqdm.write(f"[pegas]   {line}")
+    if len(attention) > 20:
+        tqdm.write(f"[pegas]   ... and {len(attention) - 20} more (see dataframe/sample_status.tsv)")
+    for report in ("report_r.html", "report.html"):
+        path = os.path.join(output_dir, "report", report)
+        if os.path.isfile(path):
+            tqdm.write(f"[pegas] Report: {path}")
+
 
 def write_sample_manifest(base_folder, fastq_files, sample_pairs):
     """Writes a JSON manifest so Snakemake can avoid re-scanning inputs."""
@@ -265,20 +325,14 @@ def write_run_config(output_dir, data_dir, args, tool_versions=None):
     config_path = os.path.join(output_dir, CONFIG_FILENAME)
     config = {
         "data": data_dir,
+        "samplesheet": getattr(args, "samplesheet", None),
         "output": output_dir,
         "cores": args.cores,
-        "overwrite": bool(args.overwrite),
-        "shovill_cpu_cores": args.shovill_cpu_cores,
         "shovill_ram": args.shovill_ram,
-        "prokka_cpu_cores": args.prokka_cpu_cores,
-        "quast_cpu_cores": getattr(args, "quast_cpu_cores", None),
-        "checkm2_cpu_cores": getattr(args, "checkm2_cpu_cores", None),
-        "roary_cpu_cores": args.roary_cpu_cores,
+        **{option: getattr(args, option, None) for option in CORE_OPTIONS},
         "on_tool_failure": args.on_tool_failure,
         "simple_report": bool(args.simple_report),
         "interactive_report": bool(args.interactive),
-        "r_report": bool(args.simple_report),
-        "html_report": bool(args.interactive),
     }
     if tool_versions is not None:
         config["tool_versions"] = tool_versions
@@ -309,7 +363,7 @@ def remove_extra_files(base_folder, destination, valid_files):
     # Remove outdated files in the fastqc directory.
     fastqc_path = os.path.join(base_folder, "fastqc")
     if os.path.exists(fastqc_path):
-        valid_file_names = [os.path.basename(file).replace(".fastq.gz", "") for file in valid_files]
+        valid_file_names = [fastq_id(file) for file in valid_files]
         for file in os.listdir(fastqc_path):
             if os.path.basename(file).replace("_fastqc.html", "").replace("_fastqc.zip", "") not in valid_file_names:
                 os.remove(os.path.join(fastqc_path, file))
@@ -324,7 +378,7 @@ def remove_extra_files(base_folder, destination, valid_files):
                 if os.path.basename(file).replace(".gff", "") not in valid_samples:
                     tqdm.write(f"[pegas] Removed '{file}' in pangenome.")
                     shutil.rmtree(os.path.join(pangenome_path, folder), ignore_errors=True)
-                    
+
                     # Remove the pangenome flag if needed.
                     pangenome_flag_path = os.path.join(base_folder, "flags", ".pangenome")
                     if os.path.exists(pangenome_flag_path):
@@ -343,33 +397,12 @@ def main():
     else:
         args = parse_arguments()
 
-
-    data_dir = os.path.abspath(os.path.expanduser(args.data))
-    output_dir = os.path.abspath(os.path.expanduser(args.output))
+    data_dir, output_dir, raw_data_files, sample_pairs = resolve_inputs(args)
+    mode = prepare_output_dir(output_dir, args.overwrite, dry_run=args.dry_run)
+    if args.dry_run:
+        print_plan(args, mode, data_dir, output_dir, sample_pairs)
+        return
     cores = args.cores
-    overwrite = args.overwrite
-
-    if not os.path.isdir(data_dir):
-        tqdm.write(f"[pegas] Input directory not found: {data_dir}")
-        sys.exit(1)
-
-    # List all FASTQ files in the raw_data_path and raw_data directories.
-    raw_data_files = list_fastq_files(data_dir)
-    if not raw_data_files:
-        tqdm.write(f"[pegas] No .fastq.gz files found in: {data_dir}")
-        sys.exit(1)
-
-    sample_pairs = build_fastq_pairs(raw_data_files)
-    if not sample_pairs:
-        tqdm.write("[pegas] No valid R1/R2 pairs found in the input folder.")
-        sys.exit(1)
-
-    # Check if the output directory exists.
-    if os.path.exists(output_dir) and not overwrite:
-        tqdm.write("[pegas]Output directory already exists. Use --overwrite to overwrite it or specify a different directory.")
-        sys.exit(1)
-    else:
-        os.makedirs(output_dir, exist_ok=True)
 
     # Remove outputs that do not exist in the input set.
     remove_extra_files(output_dir, "raw_data", raw_data_files)
@@ -379,7 +412,7 @@ def main():
 
     # Write a manifest of FASTQ files and pairs for Snakemake.
     manifest_path = write_sample_manifest(output_dir, raw_data_files, sample_pairs)
-    
+
     # Prepare configuration parameters.
     config_params = [
         f"raw_data='{data_dir}'",
@@ -389,31 +422,22 @@ def main():
         f"sample_manifest='{manifest_path}'",
         f"simple_report={args.simple_report}",
         f"interactive_report={args.interactive}",
-        f"r_report={args.simple_report}",
-        f"html_report={args.interactive}",
         f"on_tool_failure='{args.on_tool_failure}'",
     ]
+    for option in ("shovill_ram",) + CORE_OPTIONS:
+        value = getattr(args, option, None)
+        if value:
+            config_params.append(f"{option}={value}")
 
-    if args.shovill_cpu_cores:
-        config_params.append(f"shovill_cpu_cores={args.shovill_cpu_cores}")
-    if args.shovill_ram:
-        config_params.append(f"shovill_ram={args.shovill_ram}")
-    if args.prokka_cpu_cores:
-        config_params.append(f"prokka_cpu_cores={args.prokka_cpu_cores}")
-    if args.quast_cpu_cores:
-        config_params.append(f"quast_cpu_cores={args.quast_cpu_cores}")
-    if args.checkm2_cpu_cores:
-        config_params.append(f"checkm2_cpu_cores={args.checkm2_cpu_cores}")
-    if args.roary_cpu_cores:
-        config_params.append(f"roary_cpu_cores={args.roary_cpu_cores}")
-
-    # Build the Snakemake command.
+    # Build the Snakemake command. mtime-only rerun triggers make a resumed run
+    # reuse finished outputs even after a PeGAS upgrade changes rule code.
     command = [
         "snakemake",
         "--snakefile", os.path.join(path, "Snakefile"),
         "--directory", output_dir,
         "--cores", str(cores),
         "--rerun-incomplete",
+        "--rerun-triggers", "mtime",
         "--use-conda"
     ]
 
@@ -454,12 +478,13 @@ def main():
     # Run the pipeline.
     result = subprocess.run(command)
     if result.returncode != 0:
-        tqdm.write("Error: Snakemake pipeline failed.")
+        tqdm.write("Error: Snakemake pipeline failed. Per-step logs are in logs/<step>/<sample>.log.")
         sys.exit(result.returncode)
     else:
         tqdm.write("PeGAS pipeline completed successfully.")
         tool_versions = collect_tool_versions([os.path.join(output_dir, ".snakemake", "conda")])
         write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
+        print_run_summary(output_dir)
 
 if __name__ == "__main__":
     main()
