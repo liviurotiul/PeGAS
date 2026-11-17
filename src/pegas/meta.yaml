@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/liviurotiul/PeGAS/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: 7d29c011f12e6cffbbec681c9c587be2de300fc9ef9dbd3f9b711d76e5575410
+  sha256: 76312809aed3c107e54603b54a1c4d778cfeab661bfa804b6aa1293fafe65050
 
 build:
   number: 0
