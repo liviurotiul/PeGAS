@@ -1,5 +1,6 @@
 """Helpers shared by the CLI, the lite runner, the Snakefile and build_dataframe."""
 import csv
+import gzip
 import os
 import re
 import sys
@@ -39,8 +40,40 @@ AMRFINDER_ORGANISMS.update({
 })
 
 
+# Variables from the user's own shell that make conda tools load foreign Perl,
+# Python or R libraries (common on HPC and with perlbrew/user R libraries).
+LEAKY_ENV_VARS = ("PERL5LIB", "PERLLIB", "PERL_LOCAL_LIB_ROOT", "PERL_MB_OPT", "PERL_MM_OPT",
+                  "PYTHONPATH", "PYTHONHOME", "R_LIBS", "R_LIBS_USER", "R_LIBS_SITE")
+
+
+def clean_env():
+    """Copy of os.environ without LEAKY_ENV_VARS and with Python user site-packages off."""
+    env = {k: v for k, v in os.environ.items() if k not in LEAKY_ENV_VARS}
+    env["PYTHONNOUSERSITE"] = "1"
+    return env
+
+
 def warn(message):
     print(f"[pegas] Warning: {message}", file=sys.stderr)
+
+
+def has_reads(path):
+    """True if the FASTQ file (plain or gzipped) holds at least one record."""
+    try:
+        with (gzip.open if path.endswith(".gz") else open)(path, "rt") as fh:
+            return fh.readline().startswith("@")
+    except (OSError, EOFError, UnicodeDecodeError):
+        return False
+
+
+def drop_empty_samples(sample_pairs):
+    """Remove (with a warning) samples whose R1 or R2 is empty or unreadable."""
+    for sample in sorted(sample_pairs):
+        bad = [os.path.basename(f) for f in sample_pairs[sample].values() if not has_reads(f)]
+        if bad:
+            warn(f"Skipping {sample}: no reads in {', '.join(bad)}.")
+            del sample_pairs[sample]
+    return sample_pairs
 
 
 def fastq_id(path):

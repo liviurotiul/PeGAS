@@ -1,3 +1,4 @@
+import gzip
 import os
 import shutil
 import subprocess
@@ -15,7 +16,8 @@ def make_reads(folder, samples=("A", "B")):
     folder.mkdir(exist_ok=True)
     for sample in samples:
         for mate in ("R1", "R2"):
-            (folder / f"{sample}_{mate}.fastq.gz").write_text("")
+            with gzip.open(folder / f"{sample}_{mate}.fastq.gz", "wt") as fh:
+                fh.write("@read1\nACGT\n+\nIIII\n")
     return folder
 
 
@@ -56,6 +58,17 @@ def test_dry_run_lists_samples_without_touching_output(tmp_path, monkeypatch, ca
     assert not out.exists()
 
 
+def test_samples_with_empty_reads_are_skipped(tmp_path, monkeypatch, capsys):
+    reads = make_reads(tmp_path / "reads", samples=("A", "B", "C"))
+    with gzip.open(reads / "B_R2.fastq.gz", "wt"):
+        pass
+    monkeypatch.setattr(sys, "argv", ["pegas", "-d", str(reads), "-o", str(tmp_path / "out"), "--dry-run"])
+    cli.main()
+    captured = capsys.readouterr()
+    assert "2 sample(s)" in captured.out and "B:" not in captured.out
+    assert "Skipping B: no reads in B_R2.fastq.gz" in captured.err
+
+
 def test_missing_input_is_reported(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["pegas", "-o", str(tmp_path / "out")])
     with pytest.raises(SystemExit):
@@ -74,3 +87,45 @@ def test_snakefile_dry_run(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     for rule in ("shovill", "mlst", "amrfinder_organism", "amrfinder", "abricate", "abricate_vfdb.tsv", "build_dataframe"):
         assert rule in result.stdout
+
+
+def test_resume_keeps_samplesheet_samples(tmp_path):
+    # Samplesheet names need not match file names: results/isolate_A must survive a resume.
+    out = tmp_path / "out"
+    for folder in ("isolate_A", "gone"):
+        (out / "results" / folder).mkdir(parents=True)
+    reads = ["/reads/A_forward.fq.gz", "/reads/A_reverse.fq.gz"]
+    pairs = {"isolate_A": {"R1": reads[0], "R2": reads[1]}}
+    cli.remove_extra_files(str(out), "raw_data", reads, pairs)
+    assert sorted(os.listdir(out / "results")) == ["isolate_A"]
+
+
+def test_lite_fastqc_failure_is_marked_on_the_samplesheet_sample(tmp_path, monkeypatch):
+    from pegas import pipeline
+
+    def broken(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, "fastqc")
+
+    monkeypatch.setattr(pipeline, "run_command", broken)
+    pairs = {"isolate_A": {"R1": "/reads/A_forward.fq.gz", "R2": "/reads/A_reverse.fq.gz"}}
+    pipeline.run_fastqc(pairs, str(tmp_path), failure_policy="warn")
+    assert (tmp_path / "results" / "isolate_A" / "status" / "fastqc.failed.txt").is_file()
+
+
+def test_checkm2_db_dir_comes_from_the_environment(monkeypatch, tmp_path):
+    import importlib
+    from pegas import pipeline
+
+    monkeypatch.setenv("CHECKM2_DB_DIR", str(tmp_path / "db"))
+    try:
+        assert importlib.reload(pipeline).CHECKM2_DB_DIR == str(tmp_path / "db")
+    finally:
+        monkeypatch.delenv("CHECKM2_DB_DIR")
+        importlib.reload(pipeline)
+
+
+def test_snakefile_fastqc_failure_is_handled():
+    # Under --on-tool-failure warn a FastQC failure must mark the sample, not stop the run.
+    text = (PEGAS_DIR / "Snakefile").read_text()
+    rule = text.split("rule fastqc:")[1].split("\nrule ")[0]
+    assert "fail {params.sample} fastqc {output}" in rule

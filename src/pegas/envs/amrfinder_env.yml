@@ -2,5 +2,6 @@ name: amrfinder_env
 channels:
   - conda-forge
   - bioconda
+  - nodefaults
 dependencies:
-  - ncbi-amrfinderplus>=4
+  - ncbi-amrfinderplus=4.2.7

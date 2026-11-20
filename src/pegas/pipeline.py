@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -10,7 +11,7 @@ from tqdm import tqdm
 
 try:
     from .build_dataframe import build_dataframe
-    from .common import get_core_sample_name, fastq_id, amrfinder_organism, pangenome_groups
+    from .common import get_core_sample_name, fastq_id, amrfinder_organism, pangenome_groups, clean_env
     from .main import (
         build_parser, finalize_arguments, write_sample_manifest, write_run_config,
         collect_tool_versions, remove_extra_files, resolve_inputs, prepare_output_dir,
@@ -21,7 +22,7 @@ except ImportError:
     if package_root not in sys.path:
         sys.path.insert(0, package_root)
     from pegas.build_dataframe import build_dataframe
-    from pegas.common import get_core_sample_name, fastq_id, amrfinder_organism, pangenome_groups
+    from pegas.common import get_core_sample_name, fastq_id, amrfinder_organism, pangenome_groups, clean_env
     from pegas.main import (
         build_parser, finalize_arguments, write_sample_manifest, write_run_config,
         collect_tool_versions, remove_extra_files, resolve_inputs, prepare_output_dir,
@@ -53,7 +54,7 @@ CONDA_PLATFORM = None
 # Resolved CheckM2 DIAMOND database path. None = not yet resolved, "" = resolution
 # attempted and failed (so we skip CheckM2 without retrying every sample).
 CHECKM2_DB = None
-CHECKM2_DB_DIR = os.path.join(os.path.expanduser("~"), ".pegas", "checkm2_db")
+CHECKM2_DB_DIR = os.environ.get("CHECKM2_DB_DIR") or os.path.join(os.path.expanduser("~"), ".pegas", "checkm2_db")
 # Same convention for the AMRFinderPlus database ("latest" symlink made by amrfinder_update).
 AMRFINDER_DB = None
 AMRFINDER_DB_DIR = os.environ.get("AMRFINDER_DB_DIR") or os.path.join(os.path.expanduser("~"), ".pegas", "amrfinder_db")
@@ -91,6 +92,10 @@ def get_conda_platform():
     global CONDA_PLATFORM
     if CONDA_PLATFORM:
         return CONDA_PLATFORM
+    if sys.platform == "darwin" and platform.machine() == "arm64" and not os.environ.get("CONDA_SUBDIR"):
+        # Several tools (prokka, shovill, quast, abricate) have no native Apple
+        # Silicon build; the Intel builds run under Rosetta 2.
+        os.environ["CONDA_SUBDIR"] = "osx-64"
     conda_subdir = os.environ.get("CONDA_SUBDIR")
     if conda_subdir:
         CONDA_PLATFORM = conda_subdir
@@ -223,7 +228,6 @@ def create_roary_env_with_fallbacks(env_path):
             "conda", "create", "-p", env_path, "-y",
             "-c", "conda-forge",
             "-c", "bioconda",
-            "-c", "defaults",
             spec,
         ]
         result = subprocess.run(cmd)
@@ -320,7 +324,7 @@ def tool_env():
     perl system() -> /bin/sh -c` chain $SHELL is not exported, so we set both
     SHELL and PARALLEL_SHELL explicitly. See run_prokka().
     """
-    env = os.environ.copy()
+    env = clean_env()
     shell = _pick_shell()
     env["SHELL"] = shell
     env.setdefault("PARALLEL_SHELL", shell)
@@ -440,20 +444,20 @@ def valid_assembly(path):
     return False
 
 
-def run_fastqc(fastq_files, work_dir, failure_policy="stop"):
+def run_fastqc(sample_pairs, work_dir, failure_policy="stop"):
     fastqc_dir = os.path.join(work_dir, "fastqc")
     ensure_dir(fastqc_dir)
 
-    for fastq in tqdm(fastq_files, desc="FastQC"):
+    jobs = sorted((fastq, sample) for sample, reads in sample_pairs.items() for fastq in reads.values())
+    for fastq, sample in tqdm(jobs, desc="FastQC"):
         file_id = fastq_id(fastq)
         html_path = os.path.join(fastqc_dir, f"{file_id}_fastqc.html")
         zip_path = os.path.join(fastqc_dir, f"{file_id}_fastqc.zip")
         if os.path.exists(html_path) and os.path.exists(zip_path):
             continue
-        sample = get_core_sample_name(fastq)
         log_path = stage_log_path(work_dir, sample, "fastqc")
         try:
-            run_command(["fastqc", fastq, "-o", fastqc_dir], cwd=work_dir, env_name="fastqc", log_path=log_path)
+            run_command(["fastqc", "--outdir", fastqc_dir, fastq], cwd=work_dir, env_name="fastqc", log_path=log_path)
         except subprocess.CalledProcessError as exc:
             handle_tool_failure(work_dir, sample, "fastqc", exc, failure_policy, log_path=log_path)
 
@@ -961,7 +965,56 @@ def ensure_required_envs(args):
         ensure_env(env_name)
 
 
+# One quick command per tool env, used by --setup to prove each tool starts.
+TOOL_CHECKS = {
+    "fastqc": ["fastqc", "--version"],
+    "shovill": ["shovill", "--check"],
+    "amrfinder": ["amrfinder", "--version"],
+    "abricate": ["abricate", "--check"],
+    "mlst": ["mlst", "--check"],
+    "prokka": ["prokka", "--version"],
+    "quast": ["quast.py", "--version"],
+    "checkm2": ["checkm2", "--version"],
+    "roary": ["roary", "-w"],
+    "report_r": ["Rscript", "-e", "library(rmarkdown); cat(rmarkdown::pandoc_available())"],
+}
+
+
+def run_setup():
+    """Create every tool env, download the databases and check each tool starts."""
+    ensure_conda_available()
+    tqdm.write(f"[pegas] Platform: {get_conda_platform()}; tool envs in {ENV_DIR}")
+    failed = []
+    for name, cmd in TOOL_CHECKS.items():
+        try:
+            env_path = ensure_env(name)
+            result = subprocess.run(["conda", "run", "-p", env_path] + cmd,
+                                    capture_output=True, text=True, env=tool_env())
+            ok = result.returncode == 0
+            detail = (result.stdout + result.stderr).strip().splitlines()
+        except (subprocess.CalledProcessError, OSError) as exc:
+            ok, detail = False, [str(exc)]
+        tqdm.write(f"  {'ok  ' if ok else 'FAIL'}  {name:<10} {detail[-1] if detail and not ok else ''}")
+        if not ok:
+            failed.append(name)
+    for label, fetch in (("AMRFinderPlus database", ensure_amrfinder_db), ("CheckM2 database", ensure_checkm2_db)):
+        try:
+            ok = bool(fetch())
+        except subprocess.CalledProcessError:
+            ok = False
+        tqdm.write(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            failed.append(label)
+    if failed:
+        tqdm.write(f"[pegas] Setup incomplete: {', '.join(failed)}. Re-run with --setup after fixing the error above.")
+        sys.exit(1)
+    tqdm.write("[pegas] Setup complete. PeGAS is ready to run.")
+
+
 def run_pipeline(args):
+    if getattr(args, "setup", False):
+        run_setup()
+        return
     data_dir, output_dir, fastq_files, sample_pairs = resolve_inputs(args)
     mode = prepare_output_dir(output_dir, args.overwrite, dry_run=args.dry_run)
     if args.dry_run:
@@ -974,15 +1027,15 @@ def run_pipeline(args):
 
     ensure_required_envs(args)
 
-    remove_extra_files(output_dir, "raw_data", fastq_files)
+    remove_extra_files(output_dir, "raw_data", fastq_files, sample_pairs)
     write_run_config(output_dir, data_dir, args)
     write_sample_manifest(output_dir, fastq_files, sample_pairs)
 
     work_dir = output_dir
     html_path = os.path.dirname(os.path.realpath(__file__))
-    failure_policy = getattr(args, "on_tool_failure", "stop")
+    failure_policy = getattr(args, "on_tool_failure", "warn")
 
-    run_fastqc(fastq_files, work_dir, failure_policy=failure_policy)
+    run_fastqc(sample_pairs, work_dir, failure_policy=failure_policy)
     run_shovill(sample_pairs, args.shovill_cpu_cores, args.shovill_ram, work_dir, failure_policy=failure_policy)
     sample_names = sorted(sample_pairs.keys())
     run_mlst(sample_names, work_dir, failure_policy=failure_policy)

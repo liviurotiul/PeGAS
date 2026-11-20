@@ -1,6 +1,9 @@
+import os
+
 import pandas as pd
 import pytest
 
+from pegas import common
 from pegas.common import (
     amrfinder_organism,
     build_fastq_pairs,
@@ -85,3 +88,11 @@ def test_pangenome_groups_skip_unassigned_and_singletons(tmp_path):
         "SPECIES": ["ecoli", "ecoli", "ecoli", "saureus", "Unassigned", "Unassigned", "-"],
     }).to_csv(csv, index=False)
     assert pangenome_groups(csv) == {"ecoli": ["a", "b"]}
+
+
+def test_clean_env_drops_foreign_libraries(monkeypatch):
+    monkeypatch.setenv("PERL5LIB", "/home/user/perl5/lib")
+    monkeypatch.setenv("PYTHONPATH", "/opt/other")
+    env = common.clean_env()
+    assert "PERL5LIB" not in env and "PYTHONPATH" not in env
+    assert env["PYTHONNOUSERSITE"] == "1" and env["PATH"] == os.environ["PATH"]

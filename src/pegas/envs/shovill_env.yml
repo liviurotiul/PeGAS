@@ -2,7 +2,11 @@ name: shovill_env
 channels:
   - conda-forge
   - bioconda
+  - nodefaults
 dependencies:
-  - shovill
-  - megahit=1.1.2
-  - gsl=2.5
+  - shovill=1.4.2
+  - spades=3.15.5
+  - trimmomatic=0.40
+  - samtools=1.21
+  - bwa=0.7.18
+  - openjdk=22

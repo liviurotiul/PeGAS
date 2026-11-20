@@ -28,9 +28,18 @@ def config_flag(*keys, default):
 
 simple_report = config_flag("simple_report", "r_report", default=True)
 interactive_report = config_flag("interactive_report", "html_report", default=False)
-failure_policy = str(config.get("on_tool_failure", "stop")).lower()
+failure_policy = str(config.get("on_tool_failure", "warn")).lower()
 if failure_policy not in ("stop", "warn"):
-    failure_policy = "stop"
+    failure_policy = "warn"
+
+# Tool envs are shared with pegas-lite and between runs; main.py creates them
+# (from the platform pin files) before Snakemake starts.
+envs_dir = config.get("envs_dir") or os.path.join(os.path.expanduser("~"), ".pegas", "envs")
+
+
+def tool_env(name):
+    return os.path.join(envs_dir, name)
+
 
 html_path = f"{install_path}"
 rmd_template_path = os.path.join(install_path, "report_template.Rmd")
@@ -62,6 +71,7 @@ else:
 sample_names = sorted(sample_pairs)
 ABRICATE_DBS = ["plasmidfinder", "vfdb"]
 fastq_lookup = {fastq_id(f): f for reads in sample_pairs.values() for f in reads.values()}
+fastq_sample = {fastq_id(f): s for s, reads in sample_pairs.items() for f in reads.values()}
 file_names = sorted(fastq_lookup)
 
 # Bash helpers prepended to the per-sample tool rules. With --on-tool-failure warn,
@@ -88,8 +98,8 @@ skip() {  # skip <sample> <stage> <outputs...>
 begin() {  # begin <sample> <stage>: forget status markers from earlier attempts
     rm -f "results/$1/status/$2".*.txt
 }
-fail() {  # fail <sample> <stage> <outputs...>
-    mark "$1" "$2" failed "$2 failed for $1 (see logs/$2/$1.log)"
+fail() {  # fail <sample> <stage> <outputs...>; FAIL_LOG overrides the log path in the message
+    mark "$1" "$2" failed "$2 failed for $1 (see ${FAIL_LOG:-logs/$2/$1.log})"
     echo "[pegas] $2 failed for $1" >&2
     if [[ "FAILURE_POLICY" != warn ]]; then exit 1; fi
     shift 2; empty_outputs "$@"
@@ -135,12 +145,16 @@ rule fastqc:
         "logs/fastqc/{file}.log"
     benchmark:
         "benchmarks/fastqc/{file}.tsv"
+    params:
+        sample=lambda wildcards: fastq_sample[wildcards.file]
     conda:
-        "envs/fastqc_env.yml"
+        tool_env("fastqc")
     shell:
-        """
+        r"""
+        {SHELL_HELPERS}
         mkdir -p fastqc
-        fastqc {input.fastq_files} -o fastqc > {log} 2>&1
+        fastqc --outdir fastqc {input.fastq_files} > {log} 2>&1 \
+            || FAIL_LOG={log} fail {params.sample} fastqc {output}
         """
 
 rule shovill:
@@ -149,7 +163,6 @@ rule shovill:
         R2=lambda wildcards: sample_pairs[wildcards.sample]["R2"]
     output:
         assembly="results/{sample}/shovill/contigs.fa",
-        gfa="results/{sample}/shovill/contigs.gfa",
         corrections="results/{sample}/shovill/shovill.corrections",
         log="results/{sample}/shovill/shovill.log",
         spades="results/{sample}/shovill/spades.fasta"
@@ -162,7 +175,7 @@ rule shovill:
     resources:
         mem_gb=shovill_ram if shovill_ram else 0
     conda:
-        "envs/shovill_env.yml"
+        tool_env("shovill")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -184,7 +197,7 @@ rule mlst:
     benchmark:
         "benchmarks/mlst/{sample}.tsv"
     conda:
-        "envs/mlst_env.yml"
+        tool_env("mlst")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -200,7 +213,7 @@ rule amrfinder_database:
     log:
         "logs/amrfinder_database.log"
     conda:
-        "envs/amrfinder_env.yml"
+        tool_env("amrfinder")
     shell:
         r"""
         exec > {log} 2>&1
@@ -244,7 +257,7 @@ rule amrfinder:
     threads:
         amrfinder_cpus
     conda:
-        "envs/amrfinder_env.yml"
+        tool_env("amrfinder")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -270,7 +283,7 @@ rule abricate:
     benchmark:
         "benchmarks/abricate_{db}/{sample}.tsv"
     conda:
-        "envs/abricate_env.yml"
+        tool_env("abricate")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -305,7 +318,7 @@ rule prokka:
     threads:
         prokka_cpus
     conda:
-        "envs/prokka_env.yml"
+        tool_env("prokka")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -330,7 +343,7 @@ rule quast:
     threads:
         quast_cpus
     conda:
-        "envs/quast_env.yml"
+        tool_env("quast")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -347,7 +360,7 @@ rule checkm2_database:
     log:
         "logs/checkm2_database.log"
     conda:
-        "envs/checkm2_env.yml"
+        tool_env("checkm2")
     shell:
         r"""
         exec > {log} 2>&1
@@ -357,12 +370,12 @@ rule checkm2_database:
             echo "${{CHECKM2DB}}" > {output.marker}
             exit 0
         fi
-        FOUND="$(find "$DB_DIR" -name '*.dmnd' 2>/dev/null | head -n1 || true)"
+        FOUND="$(find -L "$DB_DIR" -name '*.dmnd' 2>/dev/null | head -n1 || true)"
         if [[ -z "$FOUND" ]]; then
             mkdir -p "$DB_DIR"
             echo "[pegas] Downloading CheckM2 database (~3 GB, one-time) ..." >&2
             checkm2 database --download --path "$DB_DIR" || true
-            FOUND="$(find "$DB_DIR" -name '*.dmnd' 2>/dev/null | head -n1 || true)"
+            FOUND="$(find -L "$DB_DIR" -name '*.dmnd' 2>/dev/null | head -n1 || true)"
         fi
         [[ -n "$FOUND" ]] || echo "[pegas] Warning: CheckM2 database unavailable; CheckM2 will be skipped." >&2
         echo "$FOUND" > {output.marker}
@@ -381,7 +394,7 @@ rule checkm2:
     threads:
         checkm2_cpus
     conda:
-        "envs/checkm2_env.yml"
+        tool_env("checkm2")
     shell:
         r"""
         {SHELL_HELPERS}
@@ -406,7 +419,7 @@ rule database_versions:
     output:
         db_versions="dataframe/database_versions.tsv"
     conda:
-        "envs/abricate_env.yml"
+        tool_env("abricate")
     shell:
         r"""
         mkdir -p dataframe
@@ -448,7 +461,7 @@ checkpoint pangenome:
     threads:
         roary_cpus
     conda:
-        "envs/roary_env.yml"
+        tool_env("roary")
     shell:
         """
         python {params.script} '{params.groups}' {threads} > {log} 2>&1
@@ -482,7 +495,7 @@ rule build_r_report:
     log:
         "logs/report_r.log"
     conda:
-        "envs/report_r_env.yml"
+        tool_env("report_r")
     shell:
         r"""
         Rscript "{input.render_script}" \

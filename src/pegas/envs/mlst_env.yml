@@ -2,5 +2,7 @@ name: mlst_env
 channels:
   - conda-forge
   - bioconda
+  - nodefaults
 dependencies:
-  - mlst
+  - mlst=2.33.1=hdfd78af_0  # newer builds need libxcrypt1, which only exists on Linux; same PubMLST DB as 2.35.0
+  - blast=2.16.0

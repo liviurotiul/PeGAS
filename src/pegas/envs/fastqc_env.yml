@@ -2,5 +2,6 @@ name: fastqc_env
 channels:
   - conda-forge
   - bioconda
+  - nodefaults
 dependencies:
-  - fastqc
+  - fastqc=0.12.1  # 0.13.0 dropped -o and the "poor quality" count the reports show

@@ -2,11 +2,8 @@ name: prokka_env
 channels:
   - conda-forge
   - bioconda
+  - nodefaults
 dependencies:
-  - prokka=1.14.6
-  # GNU parallel >= ~2025 aborts prokka's blastp jobs with
-  # "exec failed: No such file or directory" when no shell is exported
-  # (see pipeline.tool_env). pipeline.py sets SHELL/PARALLEL_SHELL to fix this
-  # at runtime; this cap is belt-and-suspenders so regenerated pins / YAML
-  # fallback solves don't pull the regressed parallel in the first place.
-  - parallel<=20240122
+  - prokka=1.15.6
+  - blast=2.16.0
+  - parallel<=20240122  # newer GNU parallel needs SHELL exported (PeGAS sets it); the cap is a safety net

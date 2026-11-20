@@ -67,7 +67,7 @@ outputs:
         - python >=3.10
       run:
         - {{ name }}-lite ={{ version }}
-        - snakemake-minimal >=7.32.4
+        - snakemake-minimal >=7.32.4,<10
 
     test:
       commands:

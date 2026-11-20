@@ -15,10 +15,10 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 try:
     from .gui import launch_gui
-    from .common import list_fastq_files, build_fastq_pairs, read_samplesheet, fastq_id, get_core_sample_name
+    from .common import list_fastq_files, build_fastq_pairs, read_samplesheet, fastq_id, get_core_sample_name, drop_empty_samples
 except ImportError:
     from gui import launch_gui
-    from common import list_fastq_files, build_fastq_pairs, read_samplesheet, fastq_id, get_core_sample_name
+    from common import list_fastq_files, build_fastq_pairs, read_samplesheet, fastq_id, get_core_sample_name, drop_empty_samples
 
 CAP = 16
 CONFIG_FILENAME = "pegas_config.json"
@@ -56,13 +56,16 @@ def build_parser():
     parser = argparse.ArgumentParser(description="Run the PeGAS pipeline.")
     parser.add_argument("-d", "--data", help="Directory with paired FASTQ files (.fastq.gz, .fq.gz, .fastq, .fq)")
     parser.add_argument("--samplesheet", help="CSV/TSV with columns sample,r1,r2 (alternative to --data)")
-    parser.add_argument("-o", "--output", required=True, help="Directory for outputs")
+    parser.add_argument("-o", "--output", help="Directory for outputs")
     parser.add_argument("-c", "--cores", type=int, help="Total cores to use (default: all)")
     parser.add_argument("--overwrite", action="store_true",
                         help="Delete the previous results in the output directory and start over "
                              "(without it, an existing PeGAS output directory is resumed)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show detected samples and planned resources, then exit")
+    parser.add_argument("--setup", action="store_true",
+                        help="Create the tool environments, download the databases and check every "
+                             "tool starts, then exit (no input needed)")
     parser.add_argument("--shovill-cpu-cores", type=int)
     parser.add_argument("--shovill-ram", type=int, help="RAM (GB) to allocate to Shovill")
     parser.add_argument("--prokka-cpu-cores", type=int)
@@ -73,8 +76,9 @@ def build_parser():
     parser.add_argument(
         "--on-tool-failure",
         choices=("stop", "warn"),
-        default="stop",
-        help="Stop on tool failures, or warn and continue with explicit failed/skipped sample status.",
+        default="warn",
+        help="warn (default): mark the failed sample and finish the run for all other samples; "
+             "stop: stop the whole run at the first tool failure.",
     )
     parser.add_argument("--interactive", action="store_true",
                         help="Generate the interactive HTML report (optional)")
@@ -173,7 +177,11 @@ def resolve_inputs(args):
         sample_pairs = build_fastq_pairs(fastq_files)
     if not sample_pairs:
         fail("No valid R1/R2 pairs found in the input.")
+    if not drop_empty_samples(sample_pairs):
+        fail("Every sample has empty read files.")
     fastq_files = sorted(f for reads in sample_pairs.values() for f in reads.values())
+    if not args.output:
+        fail("Provide the output folder with -o/--output.")
     output_dir = os.path.abspath(os.path.expanduser(args.output))
     return data_dir, output_dir, fastq_files, sample_pairs
 
@@ -193,7 +201,7 @@ def prepare_output_dir(output_dir, overwrite, dry_run=False):
     if mode == "overwrite":
         tqdm.write(f"[pegas] --overwrite: deleting previous results in {output_dir}")
         for entry in os.listdir(output_dir):
-            if entry == ".snakemake":  # keep cached conda environments
+            if entry == ".snakemake":  # keep Snakemake metadata
                 continue
             path = os.path.join(output_dir, entry)
             if os.path.isdir(path) and not os.path.islink(path):
@@ -231,6 +239,7 @@ def print_run_summary(output_dir):
 
     status, qc = read_tsv("sample_status.tsv"), read_tsv("assembly_qc.tsv")
     if status is None:
+        print_report_links(output_dir)
         return
     qc_by_sample = {}
     if qc is not None and "QC_STATUS" in qc.columns:
@@ -251,10 +260,16 @@ def print_run_summary(output_dir):
         tqdm.write(f"[pegas]   {line}")
     if len(attention) > 20:
         tqdm.write(f"[pegas]   ... and {len(attention) - 20} more (see dataframe/sample_status.tsv)")
+    print_report_links(output_dir)
+
+
+def print_report_links(output_dir):
+    """Last lines of a run: file:// links that terminals open on (Ctrl/Cmd+)click."""
+    from pathlib import Path
     for report in ("report_r.html", "report.html"):
-        path = os.path.join(output_dir, "report", report)
-        if os.path.isfile(path):
-            tqdm.write(f"[pegas] Report: {path}")
+        path = Path(output_dir, "report", report).resolve()
+        if path.is_file():
+            tqdm.write(f"[pegas] Open the report: {path.as_uri()}")
 
 
 def write_sample_manifest(base_folder, fastq_files, sample_pairs):
@@ -340,11 +355,15 @@ def write_run_config(output_dir, data_dir, args, tool_versions=None):
         json.dump(config, f, indent=2)
     return config_path
 
-def remove_extra_files(base_folder, destination, valid_files):
-    """Removes unwanted files from the destination directory and clears related data for affected samples."""
+def remove_extra_files(base_folder, destination, valid_files, valid_samples):
+    """Removes unwanted files from the destination directory and clears related data for affected samples.
+
+    valid_samples are the sample names of this run (the keys of the sample pairs), so a
+    samplesheet name like isolate_A is kept even when its files are named A_forward.fq.gz.
+    """
     dest_path = os.path.join(base_folder, destination)
     valid_basenames = {os.path.basename(f) for f in valid_files}
-    valid_samples = list(set([get_core_sample_name(f) for f in valid_files]))
+    valid_samples = set(valid_samples)
 
     # Remove extra files in the destination directory.
     for file in glob(os.path.join(dest_path, "*")):
@@ -397,6 +416,14 @@ def main():
     else:
         args = parse_arguments()
 
+    try:
+        from . import pipeline
+    except ImportError:
+        import pipeline
+    if args.setup:
+        pipeline.run_setup()
+        return
+
     data_dir, output_dir, raw_data_files, sample_pairs = resolve_inputs(args)
     mode = prepare_output_dir(output_dir, args.overwrite, dry_run=args.dry_run)
     if args.dry_run:
@@ -405,7 +432,7 @@ def main():
     cores = args.cores
 
     # Remove outputs that do not exist in the input set.
-    remove_extra_files(output_dir, "raw_data", raw_data_files)
+    remove_extra_files(output_dir, "raw_data", raw_data_files, sample_pairs)
 
     # Save the run configuration for later reuse.
     write_run_config(output_dir, data_dir, args)
@@ -423,6 +450,7 @@ def main():
         f"simple_report={args.simple_report}",
         f"interactive_report={args.interactive}",
         f"on_tool_failure='{args.on_tool_failure}'",
+        f"envs_dir='{pipeline.ENV_DIR}'",
     ]
     for option in ("shovill_ram",) + CORE_OPTIONS:
         value = getattr(args, option, None)
@@ -464,25 +492,23 @@ def main():
     tqdm.write("Running PeGAS pipeline with the following command:")
     tqdm.write(" ".join(command))
 
-    env_command = command + ["--conda-create-envs-only"]
-
-    # Check/create conda environments before running the pipeline jobs.
-    subprocess.run(unlock_command)
-    env_result = subprocess.run(env_command)
-    if env_result.returncode != 0:
-        tqdm.write("Error: Snakemake failed while creating conda environments.")
-        sys.exit(env_result.returncode)
-    tool_versions = collect_tool_versions([os.path.join(output_dir, ".snakemake", "conda")])
+    # Tool envs are created (or reused) by the same code as pegas-lite, so both
+    # runners and all runs share ~/.pegas/envs.
+    pipeline.ensure_conda_available()
+    pipeline.ensure_required_envs(args)
+    tool_env = pipeline.clean_env()
+    subprocess.run(unlock_command, env=tool_env)
+    tool_versions = collect_tool_versions([pipeline.ENV_DIR])
     write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
 
     # Run the pipeline.
-    result = subprocess.run(command)
+    result = subprocess.run(command, env=tool_env)
     if result.returncode != 0:
         tqdm.write("Error: Snakemake pipeline failed. Per-step logs are in logs/<step>/<sample>.log.")
         sys.exit(result.returncode)
     else:
         tqdm.write("PeGAS pipeline completed successfully.")
-        tool_versions = collect_tool_versions([os.path.join(output_dir, ".snakemake", "conda")])
+        tool_versions = collect_tool_versions([pipeline.ENV_DIR])
         write_run_config(output_dir, data_dir, args, tool_versions=tool_versions)
         print_run_summary(output_dir)
 
